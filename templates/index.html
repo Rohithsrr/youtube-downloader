@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YouTube Video Downloader</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        dark: {
+                            bg: '#0d1117',
+                            card: '#161b22',
+                            border: '#30363d',
+                            text: '#e6edf3',
+                            muted: '#8b949e',
+                            accent: '#58a6ff',
+                            accentHover: '#79b8ff',
+                            success: '#3fb950',
+                            successHover: '#56d364',
+                            danger: '#f85149',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .font-mono { font-family: 'JetBrains Mono', monospace; }
+        .quality-option { transition: all 0.15s ease; }
+        .quality-option:hover { border-color: #58a6ff; background: rgba(88, 166, 255, 0.08); }
+        .quality-option.selected { border-color: #58a6ff; background: rgba(88, 166, 255, 0.12); box-shadow: 0 0 0 1px #58a6ff; }
+        .btn-download:disabled { opacity: 0.5; cursor: not-allowed; }
+        .spinner { border-top-color: #58a6ff; animation: spin 0.8s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .fade-in { animation: fadeIn 0.2s ease-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+        .slide-up { animation: slideUp 0.3s ease-out; }
+        @keyframes slideUp { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
+        .scrollbar-thin::-webkit-scrollbar { width: 6px; }
+        .scrollbar-thin::-webkit-scrollbar-track { background: #161b22; }
+        .scrollbar-thin::-webkit-scrollbar-thumb { background: #30363d; border-radius: 3px; }
+        .scrollbar-thin::-webkit-scrollbar-thumb:hover { background: #484f58; }
+        input[type="url"]::placeholder { color: #484f58; }
+        .focus-ring:focus { outline: none; box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.3); }
+    </style>
+</head>
+<body class="dark bg-dark-bg text-dark-text min-h-screen flex flex-col">
+    <header class="border-b border-dark-border bg-dark-card/80 backdrop-blur-sm sticky top-0 z-50">
+        <div class="max-w-3xl mx-auto px-4 py-4">
+            <h1 class="text-xl font-semibold flex items-center gap-3">
+                <svg class="w-6 h-6 text-dark-accent" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M23.498 6.186a3.167 3.167 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.167 3.167 0 0 0 .502 6.186C0 7.614 0 12 0 12s0 4.386.502 5.814a3.156 3.156 0 0 0 2.122 2.136C4.495 20.455 12 20.455 12 20.455s7.505 0 9.376-.505a3.156 3.156 0 0 0 2.122-2.136C24 16.386 24 12 24 12s0-4.386-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
+                </svg>
+                YouTube Downloader
+            </h1>
+            <p class="text-dark-muted text-sm mt-0.5">Private, fast, and direct video downloads</p>
+        </div>
+    </header>
+
+    <main class="flex-1 max-w-3xl mx-auto w-full px-4 py-8">
+        <section class="bg-dark-card border border-dark-border rounded-xl p-6 slide-up" id="input-section">
+            <form id="url-form" class="space-y-4">
+                <div>
+                    <label for="url-input" class="block text-sm font-medium text-dark-muted mb-2">YouTube URL</label>
+                    <div class="relative">
+                        <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-dark-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/>
+                        </svg>
+                        <input
+                            type="url"
+                            id="url-input"
+                            name="url"
+                            placeholder="https://www.youtube.com/watch?v=..."
+                            required
+                            class="w-full bg-dark-bg border border-dark-border rounded-lg px-10 py-3 text-dark-text placeholder-dark-muted focus-ring focus:border-dark-accent transition-colors"
+                            autocomplete="url"
+                            aria-label="YouTube video URL"
+                        >
+                    </div>
+                    <p id="url-error" class="mt-1.5 text-sm text-dark-danger hidden" aria-live="polite"></p>
+                </div>
+                <button
+                    type="submit"
+                    id="analyze-btn"
+                    class="w-full bg-dark-accent hover:bg-dark-accentHover text-white font-semibold py-3 px-6 rounded-lg transition-colors focus-ring disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                    disabled
+                >
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                    </svg>
+                    <span id="btn-text">Analyze Link</span>
+                    <svg class="w-5 h-5 spinner hidden" viewBox="0 0 24 24" aria-hidden="true">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"/>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"/>
+                    </svg>
+                </button>
+            </form>
+        </section>
+
+        <section id="result-section" class="hidden mt-6 space-y-6" aria-live="polite">
+            <article class="bg-dark-card border border-dark-border rounded-xl overflow-hidden fade-in" id="video-card">
+                <div class="flex flex-col md:flex-row gap-6 p-6">
+                    <div class="md:w-64 flex-shrink-0 relative">
+                        <img id="thumbnail" src="" alt="" class="w-full aspect-video object-cover rounded-lg border border-dark-border">
+                        <div class="absolute bottom-2 right-2 bg-black/80 backdrop-blur-sm text-xs text-white px-2 py-1 rounded font-mono" id="duration"></div>
+                    </div>
+                    <div class="flex-1 min-w-0">
+                        <h2 id="video-title" class="text-lg font-semibold text-dark-text truncate md:pr-4 mb-2"></h2>
+                        <p class="text-dark-muted text-sm mb-4">Select a quality to download</p>
+                        <div class="space-y-2 max-h-64 overflow-y-auto scrollbar-thin pr-1" id="quality-list" role="listbox" aria-label="Video quality options">
+                        </div>
+                    </div>
+                </div>
+                <div class="border-t border-dark-border px-6 py-4 bg-dark-bg/50">
+                    <button
+                        type="button"
+                        id="download-btn"
+                        class="btn-download w-full md:w-auto bg-dark-success hover:bg-dark-successHover text-white font-semibold py-3 px-8 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                        disabled
+                        aria-label="Download selected quality"
+                    >
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+                        </svg>
+                        <span>Download to Device</span>
+                    </button>
+                </div>
+            </article>
+
+            <div id="error-alert" class="hidden bg-dark-danger/10 border border-dark-danger/30 text-dark-danger rounded-lg p-4 flex items-center gap-3" role="alert">
+                <svg class="w-5 h-5 flex-shrink-0" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+                </svg>
+                <p id="error-message" class="text-sm"></p>
+            </div>
+        </section>
+
+        <section class="mt-10 pt-8 border-t border-dark-border" aria-labelledby="how-it-works">
+            <h3 id="how-it-works" class="text-sm font-semibold text-dark-muted uppercase tracking-wider mb-4">How it works</h3>
+            <div class="grid gap-4 md:grid-cols-3 text-sm">
+                <div class="bg-dark-card border border-dark-border rounded-lg p-4">
+                    <div class="w-10 h-10 bg-dark-accent/10 rounded-lg flex items-center justify-center mb-3 text-dark-accent">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                        </svg>
+                    </div>
+                    <h4 class="font-medium mb-1">Paste URL</h4>
+                    <p class="text-dark-muted">Paste any YouTube video link and click Analyze</p>
+                </div>
+                <div class="bg-dark-card border border-dark-border rounded-lg p-4">
+                    <div class="w-10 h-10 bg-dark-accent/10 rounded-lg flex items-center justify-center mb-3 text-dark-accent">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                        </svg>
+                    </div>
+                    <h4 class="font-medium mb-1">Select Quality</h4>
+                    <p class="text-dark-muted">Choose from all available resolutions with file sizes</p>
+                </div>
+                <div class="bg-dark-card border border-dark-border rounded-lg p-4">
+                    <div class="w-10 h-10 bg-dark-success/10 rounded-lg flex items-center justify-center mb-3 text-dark-success">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+                        </svg>
+                    </div>
+                    <h4 class="font-medium mb-1">Direct Download</h4>
+                    <p class="text-dark-muted">Opens stream directly in browser for local save</p>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer class="border-t border-dark-border bg-dark-card/50 py-6 mt-auto">
+        <div class="max-w-3xl mx-auto px-4 text-center text-sm text-dark-muted">
+            <p>Private downloader — No accounts, no tracking, no server storage</p>
+            <p class="mt-1">Powered by <code class="font-mono text-dark-accent">yt-dlp</code> with Chrome TLS fingerprinting</p>
+        </div>
+    </footer>
+
+    <script>
+        const form = document.getElementById('url-form');
+        const urlInput = document.getElementById('url-input');
+        const urlError = document.getElementById('url-error');
+        const analyzeBtn = document.getElementById('analyze-btn');
+        const btnText = document.getElementById('btn-text');
+        const btnSpinner = analyzeBtn.querySelector('.spinner');
+        const resultSection = document.getElementById('result-section');
+        const videoCard = document.getElementById('video-card');
+        const thumbnail = document.getElementById('thumbnail');
+        const videoTitle = document.getElementById('video-title');
+        const durationEl = document.getElementById('duration');
+        const qualityList = document.getElementById('quality-list');
+        const downloadBtn = document.getElementById('download-btn');
+        const errorAlert = document.getElementById('error-alert');
+        const errorMessage = document.getElementById('error-message');
+
+        let selectedFormatId = null;
+        let currentUrl = '';
+
+        function formatDuration(seconds) {
+            if (!seconds) return '--:--';
+            const h = Math.floor(seconds / 3600);
+            const m = Math.floor((seconds % 3600) / 60);
+            const s = Math.floor(seconds % 60);
+            return h > 0 ? `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}` : `${m}:${s.toString().padStart(2, '0')}`;
+        }
+
+        function setLoading(loading) {
+            analyzeBtn.disabled = loading;
+            btnText.textContent = loading ? 'Analyzing...' : 'Analyze Link';
+            btnSpinner.classList.toggle('hidden', !loading);
+            urlInput.disabled = loading;
+        }
+
+        function showError(message) {
+            errorMessage.textContent = message;
+            errorAlert.classList.remove('hidden');
+            resultSection.classList.remove('hidden');
+            videoCard.classList.add('hidden');
+            downloadBtn.disabled = true;
+        }
+
+        function hideError() {
+            errorAlert.classList.add('hidden');
+            videoCard.classList.remove('hidden');
+        }
+
+        function clearQualitySelection() {
+            selectedFormatId = null;
+            downloadBtn.disabled = true;
+            qualityList.querySelectorAll('.quality-option').forEach(el => el.classList.remove('selected'));
+        }
+
+        function renderQualityOptions(formats) {
+            qualityList.innerHTML = '';
+            if (!formats || formats.length === 0) {
+                qualityList.innerHTML = '<p class="text-dark-muted text-sm py-4 text-center">No video-only streams found</p>';
+                return;
+            }
+            formats.forEach((fmt, idx) => {
+                const el = document.createElement('button');
+                el.type = 'button';
+                el.className = 'quality-option w-full text-left p-3 rounded-lg border border-dark-border flex items-center justify-between gap-3';
+                el.dataset.formatId = fmt.format_id;
+                el.dataset.height = fmt.height;
+                el.setAttribute('role', 'option');
+                el.setAttribute('aria-selected', 'false');
+                el.innerHTML = `
+                    <div class="flex items-center gap-3 min-w-0 flex-1">
+                        <span class="font-mono font-medium text-dark-accent whitespace-nowrap">${fmt.label}</span>
+                        <span class="text-dark-muted text-sm font-mono whitespace-nowrap">${fmt.size}</span>
+                    </div>
+                    <svg class="w-5 h-5 text-dark-accent hidden checkmark flex-shrink-0" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
+                        <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+                    </svg>
+                `;
+                el.addEventListener('click', () => selectQuality(el, fmt.format_id));
+                qualityList.appendChild(el);
+            });
+        }
+
+        function selectQuality(element, formatId) {
+            qualityList.querySelectorAll('.quality-option').forEach(el => {
+                el.classList.remove('selected');
+                el.setAttribute('aria-selected', 'false');
+                el.querySelector('.checkmark').classList.add('hidden');
+            });
+            element.classList.add('selected');
+            element.setAttribute('aria-selected', 'true');
+            element.querySelector('.checkmark').classList.remove('hidden');
+            selectedFormatId = formatId;
+            downloadBtn.disabled = false;
+        }
+
+        async function fetchInfo(url) {
+            const res = await fetch('/fetch-info', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ url })
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Failed to fetch video info');
+            return data;
+        }
+
+        async function getDownloadLink(url, formatId) {
+            const res = await fetch('/get-download-link', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ url, format_id: formatId })
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Failed to get download link');
+            return data.url;
+        }
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const url = urlInput.value.trim();
+            if (!url) return;
+
+            urlError.classList.add('hidden');
+            hideError();
+            clearQualitySelection();
+            resultSection.classList.add('hidden');
+            setLoading(true);
+
+            try {
+                const data = await fetchInfo(url);
+                currentUrl = url;
+                thumbnail.src = data.thumbnail;
+                thumbnail.alt = `Thumbnail for ${data.title}`;
+                videoTitle.textContent = data.title;
+                durationEl.textContent = formatDuration(data.duration);
+                renderQualityOptions(data.formats);
+                resultSection.classList.remove('hidden');
+                videoCard.classList.remove('hidden');
+                urlInput.value = '';
+            } catch (err) {
+                showError(err.message);
+            } finally {
+                setLoading(false);
+            }
+        });
+
+        downloadBtn.addEventListener('click', async () => {
+            if (!selectedFormatId || !currentUrl) return;
+            downloadBtn.disabled = true;
+            downloadBtn.innerHTML = `
+                <svg class="w-5 h-5 spinner" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"/></svg>
+                <span>Preparing...</span>
+            `;
+
+            try {
+                const url = await getDownloadLink(currentUrl, selectedFormatId);
+                window.open(url, '_blank', 'noopener,noreferrer');
+                downloadBtn.innerHTML = `
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+                    <span>Download to Device</span>
+                `;
+                downloadBtn.disabled = false;
+            } catch (err) {
+                showError(err.message);
+                downloadBtn.innerHTML = `
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+                    <span>Download to Device</span>
+                `;
+                downloadBtn.disabled = false;
+            }
+        });
+
+        urlInput.addEventListener('input', () => {
+            urlError.classList.add('hidden');
+            analyzeBtn.disabled = !urlInput.value.trim();
+        });
+    </script>
+</body>
+</html>
