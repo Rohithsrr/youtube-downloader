@@ -10,12 +10,6 @@ local_bin = os.path.join(os.path.dirname(__file__), 'bin')
 if os.path.exists(local_bin) and local_bin not in os.environ.get('PATH', ''):
     os.environ['PATH'] = local_bin + os.path.pathsep + os.environ.get('PATH', '')
 
-try:
-    from yt_dlp.networking.impersonate import ImpersonateTarget
-    IMPERSONATE_CHROME = ImpersonateTarget('chrome')
-except Exception:
-    IMPERSONATE_CHROME = 'chrome'
-
 app = Flask(__name__)
 
 def get_clean_cookies_text(text):
@@ -34,7 +28,6 @@ def get_base_ydl_options(extra_opts=None):
     opts = {
         'quiet': True,
         'no_warnings': True,
-        'impersonate': IMPERSONATE_CHROME,
     }
     
     cookies_content = os.environ.get("YOUTUBE_COOKIES") or os.environ.get("COOKIES_TEXT")
@@ -60,45 +53,31 @@ def has_playable_video_formats(info):
     return False
 
 def extract_info_with_fallback(url, extra_opts=None):
-    strategies = [
-        # Strategy 1: Standard with impersonation & cookies
-        get_base_ydl_options(extra_opts),
-        
-        # Strategy 2: Without impersonate flag
-        {**get_base_ydl_options(extra_opts), 'impersonate': None},
-        
-        # Strategy 3: Local browser cookies fallback (Chrome, Firefox, Edge)
-        {**get_base_ydl_options(extra_opts), 'cookiesfrombrowser': ('chrome',)},
-        {**get_base_ydl_options(extra_opts), 'cookiesfrombrowser': ('firefox',)},
-        {**get_base_ydl_options(extra_opts), 'cookiesfrombrowser': ('edge',)},
-
-        # Strategy 4: Android/iOS player clients (guarantees playable video format on cloud hosting)
-        {**get_base_ydl_options(extra_opts), 'extractor_args': {'youtube': {'player_client': ['android', 'ios']}}},
-        
-        # Strategy 5: Android/iOS without impersonate
-        {**get_base_ydl_options(extra_opts), 'impersonate': None, 'extractor_args': {'youtube': {'player_client': ['android', 'ios']}}}
-    ]
-
     last_error = None
-    best_res = None
     download_flag = extra_opts.get('download', False) if extra_opts else False
 
-    for opts in strategies:
-        try:
-            opts_clean = {k: v for k, v in opts.items() if v is not None}
-            with yt_dlp.YoutubeDL(opts_clean) as ydl:
-                res = ydl.extract_info(url, download=download_flag)
-                if has_playable_video_formats(res):
-                    return res
-                if res and not best_res:
-                    best_res = res
-        except Exception as e:
-            last_error = e
+    # Strategy 1: Clean yt-dlp with cookies if set
+    try:
+        opts1 = get_base_ydl_options(extra_opts)
+        with yt_dlp.YoutubeDL(opts1) as ydl:
+            res = ydl.extract_info(url, download=download_flag)
+            if has_playable_video_formats(res):
+                return res
+    except Exception as e:
+        last_error = e
 
-    if best_res:
-        return best_res
+    # Strategy 2: Without cookiefile (in case cookies are expired/invalid)
+    try:
+        opts2 = get_base_ydl_options(extra_opts)
+        opts2.pop('cookiefile', None)
+        with yt_dlp.YoutubeDL(opts2) as ydl:
+            res = ydl.extract_info(url, download=download_flag)
+            if res:
+                return res
+    except Exception as e:
+        last_error = e
 
-    raise last_error
+    raise last_error if last_error else Exception("Failed to extract video information")
 
 def estimate_size_mb(fmt, duration):
     try:
