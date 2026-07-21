@@ -18,6 +18,13 @@ except Exception:
 
 app = Flask(__name__)
 
+@app.after_request
+def add_cors_headers(response):
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization'
+    response.headers['Access-Control-Allow-Methods'] = 'GET,POST,OPTIONS'
+    return response
+
 def format_as_netscape_cookiefile(text):
     if not text:
         return None
@@ -138,8 +145,11 @@ def estimate_size_mb(fmt, duration):
 def index():
     return render_template('index.html')
 
-@app.route('/fetch-info', methods=['POST'])
+@app.route('/fetch-info', methods=['POST', 'OPTIONS'])
 def fetch_info():
+    if request.method == 'OPTIONS':
+        return jsonify({}), 200
+
     data = request.get_json() or {}
     url = data.get('url', '').strip()
     
@@ -218,8 +228,11 @@ def fetch_info():
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
-@app.route('/get-download-link', methods=['POST'])
+@app.route('/get-download-link', methods=['POST', 'OPTIONS'])
 def get_download_link():
+    if request.method == 'OPTIONS':
+        return jsonify({}), 200
+
     data = request.get_json() or {}
     url = data.get('url', '').strip()
     format_id = data.get('format_id', '').strip()
