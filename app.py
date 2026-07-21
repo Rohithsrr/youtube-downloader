@@ -1,5 +1,4 @@
 import os
-import random
 import shutil
 import tempfile
 import traceback
@@ -19,13 +18,8 @@ except Exception:
 
 app = Flask(__name__)
 
-# Verified Working Webshare Residential Proxies
-WEBSHARE_PROXIES = [
-    'http://jufzjzml:5ibfzrazhgap@31.59.20.176:6754',
-    'http://jufzjzml:5ibfzrazhgap@31.56.127.193:7684',
-    'http://jufzjzml:5ibfzrazhgap@84.247.60.125:6095',
-    'http://jufzjzml:5ibfzrazhgap@191.96.254.138:6185',
-]
+# Single Primary Fast Webshare Residential Proxy
+PRIMARY_PROXY = 'http://jufzjzml:5ibfzrazhgap@31.59.20.176:6754'
 
 DEFAULT_COOKIES = """# Netscape HTTP Cookie File
 .youtube.com	TRUE	/	TRUE	1798089081	VISITOR_PRIVACY_METADATA	CgJJThIEGgAgRg%3D%3D
@@ -88,7 +82,7 @@ def get_base_ydl_options(extra_opts=None):
         'quiet': True,
         'no_warnings': True,
         'impersonate': IMPERSONATE_CHROME,
-        'socket_timeout': 5,
+        'socket_timeout': 3,
     }
     
     cookies_content = (
@@ -121,23 +115,19 @@ def has_playable_video_formats(info):
 
 def extract_info_with_fallback(url, extra_opts=None):
     download_flag = extra_opts.get('download', False) if extra_opts else False
-    errors = []
 
-    proxy_pool = WEBSHARE_PROXIES[:]
+    # Strategy 1: Primary Residential Proxy + Session Cookies
+    try:
+        opts = get_base_ydl_options(extra_opts)
+        opts['proxy'] = PRIMARY_PROXY
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            res = ydl.extract_info(url, download=download_flag)
+            if has_playable_video_formats(res):
+                return res
+    except Exception as e:
+        last_error = e
 
-    # Strategy 1: Residential Proxy Pool + Cookies
-    for proxy in proxy_pool:
-        try:
-            opts = get_base_ydl_options(extra_opts)
-            opts['proxy'] = proxy
-            with yt_dlp.YoutubeDL(opts) as ydl:
-                res = ydl.extract_info(url, download=download_flag)
-                if has_playable_video_formats(res):
-                    return res
-        except Exception as e:
-            errors.append(f"Proxy ({proxy[:25]}): {str(e)}")
-
-    # Strategy 2: Direct connection with cookies fallback
+    # Strategy 2: Direct connection fallback
     try:
         opts = get_base_ydl_options(extra_opts)
         with yt_dlp.YoutubeDL(opts) as ydl:
@@ -145,10 +135,9 @@ def extract_info_with_fallback(url, extra_opts=None):
             if has_playable_video_formats(res):
                 return res
     except Exception as e:
-        errors.append(f"Direct: {str(e)}")
+        last_error = e
 
-    err_summary = " | ".join(errors) if errors else "Extraction failed"
-    raise Exception(err_summary)
+    raise last_error if 'last_error' in locals() else Exception("Failed to extract video information from YouTube.")
 
 def estimate_size_mb(fmt, duration):
     try:
