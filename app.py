@@ -5,31 +5,12 @@ import traceback
 from flask import Flask, render_template, request as flask_request, jsonify, send_file, after_this_request
 import yt_dlp
 
-# Add local ./bin directory to PATH if present (for static ffmpeg on Render)
+# Add local ./bin directory to PATH if present (for static ffmpeg)
 local_bin = os.path.join(os.path.dirname(__file__), 'bin')
 if os.path.exists(local_bin) and local_bin not in os.environ.get('PATH', ''):
     os.environ['PATH'] = local_bin + os.path.pathsep + os.environ.get('PATH', '')
 
 app = Flask(__name__)
-
-# Primary Residential Proxy
-PRIMARY_PROXY = 'http://jufzjzml:5ibfzrazhgap@31.59.20.176:6754'
-
-DEFAULT_COOKIES = """# Netscape HTTP Cookie File
-.youtube.com	TRUE	/	TRUE	1798089081	VISITOR_PRIVACY_METADATA	CgJJThIEGgAgRg%3D%3D
-.youtube.com	TRUE	/	TRUE	1798089081	VISITOR_INFO1_LIVE	u7nb7Mcu6ls
-.youtube.com	TRUE	/	TRUE	1819181304	PREF	f7=4100&tz=Asia.Calcutta&f4=4000000&f5=20000
-.youtube.com	TRUE	/	TRUE	1791204351	__Secure-BUCKET	CIAG
-.youtube.com	TRUE	/	TRUE	1813162597	LOGIN_INFO	AFmmF2swRQIhAIgOEd1a2XI4zwkOub1ppm-drTLxAyAg2EQZ9k2QL7mMAiBkE8nkwU1zSijERylGoJWW3jBeEYRPkINbsklMP4kYuA:QUQ3MjNmenc5TWdYVW9sV1piM3lQZHlhTGFLdnZQTEt2STUwZ0d0ZFVrQmZsZ0E1d1owM2xuanBRTjFEaHJHUWpPTXU4LU83MTJyeE9YcUFTX21rbE85MFZCMGZCMXZyZUYxb196QTZ0Nk5rc0dma3FrMS1DQWs1cDBGMGZOcUNDM05pbGZFNUlMOXBndm1zcnpRT1B5M0Noak5nT0FvSTRR
-.youtube.com	TRUE	/	FALSE	1819123809	HSID	AvN5juLVPxa-G5K_n
-.youtube.com	TRUE	/	TRUE	1819123809	SSID	ActLeCD2kFJK5T6XM
-.youtube.com	TRUE	/	FALSE	1819123809	APISID	v_GrH6QJtJqkqcSF/AoGyXJVnf2P5zYmBO
-.youtube.com	TRUE	/	TRUE	1819123809	SAPISID	lGNUPf
-.youtube.com	TRUE	/	TRUE	1819123809	__Secure-1PAPISID	lGNUPf
-.youtube.com	TRUE	/	TRUE	1819123809	__Secure-3PAPISID	lGNUPf
-.youtube.com	TRUE	/	FALSE	1819123809	SID	g.a000AgkHpeb17C4y8tSrGGXzjvsB3j3xFdi2nHPyvEAa32mTH4WNv0U4hMqDT84Zo-n8ufoxfwACgYKASQSARYSFQHGX2MiSaVkzCKrw--CFQNNF6V7-xoVAUF8yKqphNsj4dKMDTnJyRnUsrX80076
-.youtube.com	TRUE	/	TRUE	1819123809	__Secure-1PSID	g.a000AgkHpeb17C4y8tSrGGXzjvsB3j3xFdi2nHPyvEAa32mTH4WNv0U4hMqDT84Zo-n8ufoxfwACgYKASQSARYSFQHGX2MiSaVkzCKrw--CFQNNF6V7-xoVAUF8yKqphNsj4dKMDTnJyRnUsrX80076
-.youtube.com	TRUE	/	TRUE	1819123809	__Secure-3PSID	g.a000AgkHpeb17C4y8tSrGGXzjvsB3j3xFdi2nHPyvEAa32mTH4WNv0U4hMqDT84Zo-n8ufoxfwACgYKASQSARYSFQHGX2MiSaVkzCKrw--CFQNNF6V7-xoVAUF8yKqphNsj4dKMDTnJyRnUsrX80076"""
 
 @app.after_request
 def add_cors_headers(response):
@@ -38,109 +19,15 @@ def add_cors_headers(response):
     response.headers['Access-Control-Allow-Methods'] = 'GET,POST,OPTIONS'
     return response
 
-def format_as_netscape_cookiefile(text):
-    if not text:
-        return None
-    clean = text.strip().strip('\'"').replace('\\n', '\n').replace('\\r', '').replace('\\t', '\t')
-    out_lines = [
-        '# Netscape HTTP Cookie File',
-        '# https://curl.haxx.se/rfc/cookie_spec.html',
-        '# This is a generated file! Do not edit.'
-    ]
-    
-    for line in clean.splitlines():
-        line = line.strip().strip('\'"')
-        if not line or line.startswith('#'):
-            continue
-            
-        parts = line.split('\t')
-        if len(parts) < 7:
-            parts = [p for p in line.split(' ') if p]
-            
-        if len(parts) >= 7:
-            domain = parts[0]
-            flag1 = parts[1]
-            path = parts[2]
-            flag2 = parts[3]
-            expiration = parts[4]
-            name = parts[5]
-            value = ' '.join(parts[6:])
-            out_lines.append(f"{domain}\t{flag1}\t{path}\t{flag2}\t{expiration}\t{name}\t{value}")
-
-    if len(out_lines) > 3:
-        return '\n'.join(out_lines)
-    return None
-
 def get_base_ydl_options(extra_opts=None):
     opts = {
         'quiet': True,
         'no_warnings': True,
-        'socket_timeout': 4,
+        'socket_timeout': 10,
     }
-    
-    cookies_content = (
-        os.environ.get("YOUTUBE_COOKIES") or 
-        os.environ.get("COOKIES_TEXT") or 
-        os.environ.get("COOKIES") or 
-        os.environ.get("YT_COOKIES") or
-        DEFAULT_COOKIES
-    )
-    clean_cookies = format_as_netscape_cookiefile(cookies_content)
-    if clean_cookies:
-        tmp_fd, cookie_file_path = tempfile.mkstemp(suffix='.txt', prefix='yt_cookies_')
-        with os.fdopen(tmp_fd, 'w', encoding='utf-8') as f:
-            f.write(clean_cookies)
-        opts['cookiefile'] = cookie_file_path
-
     if extra_opts:
         opts.update(extra_opts)
     return opts
-
-def cleanup_opts_cookiefile(opts):
-    cookiefile = opts.get('cookiefile')
-    if cookiefile and os.path.exists(cookiefile):
-        try:
-            os.remove(cookiefile)
-        except Exception:
-            pass
-
-def extract_info_with_fallback(url, extra_opts=None):
-    download_flag = extra_opts.get('download', False) if extra_opts else False
-
-    # Strategy 1: Primary Residential Proxy + Session Cookies
-    opts1 = get_base_ydl_options(extra_opts)
-    opts1['proxy'] = PRIMARY_PROXY
-    try:
-        with yt_dlp.YoutubeDL(opts1) as ydl:
-            res = ydl.extract_info(url, download=download_flag)
-            if res and res.get('formats'):
-                stream_fmts = [f for f in res.get('formats', []) if f.get('ext') not in ('mhtml', 'storyboard')]
-                if stream_fmts:
-                    cleanup_opts_cookiefile(opts1)
-                    return res
-    except Exception as e:
-        proxy_err = str(e)
-    finally:
-        cleanup_opts_cookiefile(opts1)
-
-    # Strategy 2: Direct connection fallback
-    opts2 = get_base_ydl_options(extra_opts)
-    try:
-        with yt_dlp.YoutubeDL(opts2) as ydl:
-            res = ydl.extract_info(url, download=download_flag)
-            if res and res.get('formats'):
-                stream_fmts = [f for f in res.get('formats', []) if f.get('ext') not in ('mhtml', 'storyboard')]
-                if stream_fmts:
-                    cleanup_opts_cookiefile(opts2)
-                    return res
-    except Exception as e:
-        direct_err = str(e)
-    finally:
-        cleanup_opts_cookiefile(opts2)
-
-    p_err = proxy_err if 'proxy_err' in locals() else 'Proxy returned 0 formats'
-    d_err = direct_err if 'direct_err' in locals() else 'Direct returned 0 formats'
-    raise Exception(f"Proxy Failed ({p_err}) | Direct Failed ({d_err})")
 
 def estimate_size_mb(fmt, duration):
     try:
@@ -177,7 +64,9 @@ def fetch_info():
         return jsonify({'error': 'Please provide a valid YouTube URL.'}), 400
 
     try:
-        info = extract_info_with_fallback(url, {'format': 'all'})
+        opts = get_base_ydl_options()
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(url, download=False)
             
         title = info.get('title', 'Unknown Title')
         thumbnail = info.get('thumbnail', '')
@@ -218,7 +107,7 @@ def fetch_info():
                 'size': size_str
             })
 
-        # Pass 2: Fallback for progressive / audio formats
+        # Pass 2: Fallback for progressive / audio formats if no vcodec formats found
         if not quality_options:
             seen_fallback_ids = set()
             for fmt in formats:
@@ -247,7 +136,7 @@ def fetch_info():
             'title': title,
             'thumbnail': thumbnail,
             'duration': duration,
-            'formats': quality_options,
+            'formats': quality_options
         })
 
     except Exception as e:
@@ -269,7 +158,10 @@ def get_download_link():
 
     try:
         format_rule = f"{format_id}+bestaudio/bestvideo+bestaudio/best/worst" if format_id != 'best' else 'best'
-        info = extract_info_with_fallback(url, {'format': format_rule})
+        opts = get_base_ydl_options({'format': format_rule})
+        
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(url, download=False)
 
         direct_url = None
 
@@ -311,14 +203,14 @@ def download_stream():
         outtmpl = os.path.join(temp_dir, 'video.%(ext)s')
         format_rule = f"{format_id}+bestaudio/bestvideo+bestaudio/best/worst" if format_id != 'best' else 'best'
         
-        extra_opts = {
+        opts = get_base_ydl_options({
             'format': format_rule,
             'merge_output_format': 'mp4',
             'outtmpl': outtmpl,
-            'download': True
-        }
+        })
         
-        info = extract_info_with_fallback(url, extra_opts)
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(url, download=True)
         
         mp4_path = os.path.join(temp_dir, 'video.mp4')
         final_path = mp4_path if os.path.exists(mp4_path) else None
@@ -363,4 +255,5 @@ def download_stream():
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
+    print(f"Server starting on http://127.0.0.1:{port}")
     app.run(host='0.0.0.0', port=port, debug=True)
