@@ -18,16 +18,37 @@ except Exception:
 
 app = Flask(__name__)
 
-def get_clean_cookies_text(text):
+def format_as_netscape_cookiefile(text):
     if not text:
         return None
-    # Unescape literal \n, \r, and \t from environment variables
-    fixed = text.replace('\\n', '\n').replace('\\r', '').replace('\\t', '\t')
-    if len(fixed.strip()) < 50:
-        return None
-    lines = [line.strip() for line in fixed.splitlines() if line.strip() and not line.strip().startswith('#')]
-    if any('youtube' in line.lower() for line in lines):
-        return fixed
+    clean = text.replace('\\n', '\n').replace('\\r', '').replace('\\t', '\t')
+    out_lines = [
+        '# Netscape HTTP Cookie File',
+        '# https://curl.haxx.se/rfc/cookie_spec.html',
+        '# This is a generated file! Do not edit.'
+    ]
+    
+    for line in clean.splitlines():
+        line = line.strip()
+        if not line or line.startswith('#'):
+            continue
+            
+        parts = line.split('\t')
+        if len(parts) < 7:
+            parts = [p for p in line.split(' ') if p]
+            
+        if len(parts) >= 7:
+            domain = parts[0]
+            flag1 = parts[1]
+            path = parts[2]
+            flag2 = parts[3]
+            expiration = parts[4]
+            name = parts[5]
+            value = ' '.join(parts[6:])
+            out_lines.append(f"{domain}\t{flag1}\t{path}\t{flag2}\t{expiration}\t{name}\t{value}")
+
+    if len(out_lines) > 3:
+        return '\n'.join(out_lines)
     return None
 
 def get_base_ydl_options(extra_opts=None):
@@ -38,7 +59,7 @@ def get_base_ydl_options(extra_opts=None):
     }
     
     cookies_content = os.environ.get("YOUTUBE_COOKIES") or os.environ.get("COOKIES_TEXT")
-    clean_cookies = get_clean_cookies_text(cookies_content)
+    clean_cookies = format_as_netscape_cookiefile(cookies_content)
     if clean_cookies:
         cookie_file_path = os.path.join(tempfile.gettempdir(), 'yt_cookies.txt')
         with open(cookie_file_path, 'w', encoding='utf-8') as f:
