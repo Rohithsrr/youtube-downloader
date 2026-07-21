@@ -18,11 +18,17 @@ except Exception:
 
 app = Flask(__name__)
 
-def is_valid_cookie_text(text):
-    if not text or len(text.strip()) < 50:
-        return False
-    lines = [line.strip() for line in text.splitlines() if line.strip() and not line.strip().startswith('#')]
-    return any('youtube' in line.lower() for line in lines)
+def get_clean_cookies_text(text):
+    if not text:
+        return None
+    # Unescape literal \n, \r, and \t from environment variables
+    fixed = text.replace('\\n', '\n').replace('\\r', '').replace('\\t', '\t')
+    if len(fixed.strip()) < 50:
+        return None
+    lines = [line.strip() for line in fixed.splitlines() if line.strip() and not line.strip().startswith('#')]
+    if any('youtube' in line.lower() for line in lines):
+        return fixed
+    return None
 
 def get_base_ydl_options(extra_opts=None):
     opts = {
@@ -32,10 +38,11 @@ def get_base_ydl_options(extra_opts=None):
     }
     
     cookies_content = os.environ.get("YOUTUBE_COOKIES") or os.environ.get("COOKIES_TEXT")
-    if is_valid_cookie_text(cookies_content):
+    clean_cookies = get_clean_cookies_text(cookies_content)
+    if clean_cookies:
         cookie_file_path = os.path.join(tempfile.gettempdir(), 'yt_cookies.txt')
         with open(cookie_file_path, 'w', encoding='utf-8') as f:
-            f.write(cookies_content)
+            f.write(clean_cookies)
         opts['cookiefile'] = cookie_file_path
 
     if extra_opts:
@@ -113,75 +120,58 @@ def fetch_info():
         duration = info.get('duration', 0)
         formats = info.get('formats', [])
         
-        height_map = {}
+        quality_options = []
+        seen_heights = set()
+        
+        # Pass 1: Extract video formats with vcodec != 'none'
         for fmt in formats:
             vcodec = fmt.get('vcodec')
-            if vcodec == 'none':
+            if vcodec == 'none' or not vcodec:
                 continue
 
-            height = fmt.get('height')
-            if not height:
-                fmt_note = str(fmt.get('format_note', ''))
-                res_str = str(fmt.get('resolution', ''))
-                for val in [fmt_note, res_str]:
-                    if 'p' in val:
-                        try:
-                            height = int(val.lower().split('p')[0])
-                            break
-                        except Exception:
-                            pass
-            
+            height = fmt.get('height') or 0
             fmt_id = fmt.get('format_id')
             fps = fmt.get('fps', 0) or 0
-            tbr = fmt.get('tbr', 0) or 0
             ext = fmt.get('ext', 'mp4')
-            
             size_mb = estimate_size_mb(fmt, duration)
-            
-            key_h = height if height else (fmt_id if fmt_id else 'best')
-            
-            if key_h not in height_map or (tbr > height_map[key_h]['tbr']):
-                height_map[key_h] = {
-                    'format_id': str(fmt_id),
-                    'height': int(height) if height else 0,
-                    'fps': int(fps) if fps else 0,
-                    'ext': ext,
-                    'tbr': tbr,
-                    'size_mb': size_mb
-                }
 
-        # Fallback if no vcodec != 'none' formats found (e.g. progressive or restricted streams)
-        if not height_map:
+            h_text = f"{height}p" if height > 0 else "Video"
+            fps_text = f" {int(fps)}fps" if fps > 30 else ""
+            label = f"{h_text}{fps_text} ({ext.upper()})"
+            size_str = f"~{size_mb} MB" if size_mb else "Unknown size"
+            
+            key = (height, ext)
+            if key not in seen_heights:
+                seen_heights.add(key)
+                quality_options.append({
+                    'format_id': str(fmt_id),
+                    'height': int(height),
+                    'label': label,
+                    'size': size_str,
+                    'size_mb': size_mb
+                })
+
+        # Pass 2: Fallback if no vcodec != 'none' formats found
+        if not quality_options:
             for fmt in formats:
                 ext = fmt.get('ext', '')
-                if ext == 'mhtml':
+                if ext == 'mhtml' or ext == 'storyboard':
                     continue
                 fmt_id = fmt.get('format_id')
                 height = fmt.get('height', 0) or 0
                 size_mb = estimate_size_mb(fmt, duration)
-                height_map[fmt_id] = {
+                h_text = f"{height}p" if height > 0 else "Download"
+                label = f"{h_text} ({ext.upper() if ext else 'MP4'})"
+                size_str = f"~{size_mb} MB" if size_mb else "Unknown size"
+                quality_options.append({
                     'format_id': str(fmt_id),
-                    'height': height,
-                    'fps': 0,
-                    'ext': ext if ext else 'mp4',
-                    'tbr': fmt.get('tbr', 0) or 0,
+                    'height': int(height),
+                    'label': label,
+                    'size': size_str,
                     'size_mb': size_mb
-                }
+                })
 
-        quality_options = []
-        for h in sorted(height_map.keys(), key=lambda x: height_map[x]['height'], reverse=True):
-            item = height_map[h]
-            size_str = f"~{item['size_mb']} MB" if item['size_mb'] else "Unknown size"
-            fps_text = f" {item['fps']}fps" if item['fps'] > 30 else ""
-            height_label = f"{item['height']}p" if item['height'] > 0 else "Standard Quality"
-            label = f"{height_label}{fps_text} ({item['ext'].upper()})"
-            quality_options.append({
-                'format_id': item['format_id'],
-                'height': item['height'],
-                'label': label,
-                'size': size_str,
-                'size_mb': item['size_mb']
-            })
+        quality_options.sort(key=lambda x: x['height'], reverse=True)
 
         return jsonify({
             'title': title,
