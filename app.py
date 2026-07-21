@@ -98,6 +98,7 @@ def get_base_ydl_options(extra_opts=None):
 
 def extract_info_with_fallback(url, extra_opts=None):
     download_flag = extra_opts.get('download', False) if extra_opts else False
+    errors = []
 
     # Strategy 1: Primary Residential Proxy + Session Cookies
     try:
@@ -107,8 +108,10 @@ def extract_info_with_fallback(url, extra_opts=None):
             res = ydl.extract_info(url, download=download_flag)
             if res and res.get('formats'):
                 return res
+            else:
+                errors.append("Proxy returned 0 formats")
     except Exception as e:
-        proxy_err = str(e)
+        errors.append(f"Proxy error: {str(e)}")
 
     # Strategy 2: Direct connection fallback
     try:
@@ -117,12 +120,12 @@ def extract_info_with_fallback(url, extra_opts=None):
             res = ydl.extract_info(url, download=download_flag)
             if res and res.get('formats'):
                 return res
+            else:
+                errors.append("Direct returned 0 formats")
     except Exception as e:
-        direct_err = str(e)
+        errors.append(f"Direct error: {str(e)}")
 
-    p_err = proxy_err if 'proxy_err' in locals() else 'Proxy returned 0 formats'
-    d_err = direct_err if 'direct_err' in locals() else 'Direct returned 0 formats'
-    raise Exception(f"Proxy Failed ({p_err}) | Direct Failed ({d_err})")
+    raise Exception(" | ".join(errors) if errors else "Extraction failed")
 
 def estimate_size_mb(fmt, duration):
     try:
