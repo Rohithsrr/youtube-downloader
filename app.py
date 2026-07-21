@@ -12,12 +12,10 @@ if os.path.exists(local_bin) and local_bin not in os.environ.get('PATH', ''):
 
 app = Flask(__name__)
 
-# Verified Working Sticky Residential Proxies
+# Verified Working Sticky Residential Proxies (Top 2 for fast sub-3s response)
 VERIFIED_STICKY_PROXIES = [
     'http://jufzjzml:5ibfzrazhgap@31.59.20.176:6754',
     'http://jufzjzml:5ibfzrazhgap@31.56.127.193:7684',
-    'http://jufzjzml:5ibfzrazhgap@45.38.107.97:6014',
-    'http://jufzjzml:5ibfzrazhgap@84.247.60.125:6095',
 ]
 
 DEFAULT_COOKIES = """# Netscape HTTP Cookie File
@@ -80,7 +78,7 @@ def get_base_ydl_options(extra_opts=None):
     opts = {
         'quiet': True,
         'no_warnings': True,
-        'socket_timeout': 4,
+        'socket_timeout': 3,
     }
     
     cookies_content = (
@@ -113,7 +111,7 @@ def extract_info_with_fallback(url, extra_opts=None):
     download_flag = extra_opts.get('download', False) if extra_opts else False
     errors = []
 
-    # Strategy 1: Verified Sticky Residential Proxy Pool
+    # Strategy 1: Top 2 Verified Sticky Residential Proxies
     for proxy in VERIFIED_STICKY_PROXIES:
         opts = get_base_ydl_options(extra_opts)
         opts['proxy'] = proxy
