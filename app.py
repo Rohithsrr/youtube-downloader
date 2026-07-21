@@ -106,9 +106,7 @@ def extract_info_with_fallback(url, extra_opts=None):
         with yt_dlp.YoutubeDL(opts) as ydl:
             res = ydl.extract_info(url, download=download_flag)
             if res and res.get('formats'):
-                fmts = [f for f in res.get('formats', []) if f.get('ext') not in ('mhtml', 'storyboard')]
-                if fmts:
-                    return res
+                return res
     except Exception as e:
         proxy_err = str(e)
 
@@ -118,14 +116,12 @@ def extract_info_with_fallback(url, extra_opts=None):
         with yt_dlp.YoutubeDL(opts) as ydl:
             res = ydl.extract_info(url, download=download_flag)
             if res and res.get('formats'):
-                fmts = [f for f in res.get('formats', []) if f.get('ext') not in ('mhtml', 'storyboard')]
-                if fmts:
-                    return res
+                return res
     except Exception as e:
         direct_err = str(e)
 
-    p_err = proxy_err if 'proxy_err' in locals() else 'Proxy returned 0 valid stream formats'
-    d_err = direct_err if 'direct_err' in locals() else 'Direct returned 0 valid stream formats'
+    p_err = proxy_err if 'proxy_err' in locals() else 'Proxy returned 0 formats'
+    d_err = direct_err if 'direct_err' in locals() else 'Direct returned 0 formats'
     raise Exception(f"Proxy Failed ({p_err}) | Direct Failed ({d_err})")
 
 def estimate_size_mb(fmt, duration):
@@ -233,7 +229,9 @@ def fetch_info():
             'title': title,
             'thumbnail': thumbnail,
             'duration': duration,
-            'formats': quality_options
+            'formats': quality_options,
+            'debug_raw_count': len(formats),
+            'debug_sample': [{'id': f.get('format_id'), 'vcodec': f.get('vcodec'), 'ext': f.get('ext')} for f in formats[:5]] if formats else []
         })
 
     except Exception as e:
