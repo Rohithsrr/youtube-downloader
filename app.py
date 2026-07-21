@@ -124,7 +124,6 @@ def extract_info_with_fallback(url, extra_opts=None):
     errors = []
 
     proxy_pool = WEBSHARE_PROXIES[:]
-    random.shuffle(proxy_pool)
 
     # Strategy 1: Residential Proxy Pool + Cookies
     for proxy in proxy_pool:
@@ -136,7 +135,7 @@ def extract_info_with_fallback(url, extra_opts=None):
                 if has_playable_video_formats(res):
                     return res
         except Exception as e:
-            errors.append(str(e))
+            errors.append(f"Proxy ({proxy[:25]}): {str(e)}")
 
     # Strategy 2: Direct connection with cookies fallback
     try:
@@ -146,9 +145,9 @@ def extract_info_with_fallback(url, extra_opts=None):
             if has_playable_video_formats(res):
                 return res
     except Exception as e:
-        errors.append(str(e))
+        errors.append(f"Direct: {str(e)}")
 
-    err_summary = errors[-1] if errors else "Extraction failed"
+    err_summary = " | ".join(errors) if errors else "Extraction failed"
     raise Exception(err_summary)
 
 def estimate_size_mb(fmt, duration):
