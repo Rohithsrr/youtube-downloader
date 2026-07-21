@@ -1,8 +1,10 @@
 import os
+import random
 import shutil
 import tempfile
 import traceback
-from flask import Flask, render_template, request, jsonify, send_file, after_this_request
+import requests
+from flask import Flask, render_template, request as flask_request, jsonify, send_file, after_this_request
 import yt_dlp
 
 # Add local ./bin directory to PATH if present (for static ffmpeg on Render)
@@ -24,6 +26,17 @@ def add_cors_headers(response):
     response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization'
     response.headers['Access-Control-Allow-Methods'] = 'GET,POST,OPTIONS'
     return response
+
+def get_free_proxy():
+    try:
+        res = requests.get('https://api.proxyscrape.com/v2/?request=getproxies&protocol=http&timeout=3000&country=all&ssl=all&anonymity=all', timeout=3)
+        if res.ok and res.text:
+            proxies = [p.strip() for p in res.text.splitlines() if p.strip()]
+            if proxies:
+                return f"http://{random.choice(proxies[:15])}"
+    except Exception:
+        pass
+    return None
 
 def format_as_netscape_cookiefile(text):
     if not text:
@@ -65,6 +78,16 @@ def get_base_ydl_options(extra_opts=None):
         'impersonate': IMPERSONATE_CHROME,
     }
     
+    # Configure Proxy from Environment Variables if set
+    proxy_env = (
+        os.environ.get("PROXY_URL") or 
+        os.environ.get("HTTP_PROXY") or 
+        os.environ.get("HTTPS_PROXY") or 
+        os.environ.get("PROXIES")
+    )
+    if proxy_env:
+        opts['proxy'] = proxy_env.strip()
+    
     cookies_content = (
         os.environ.get("YOUTUBE_COOKIES") or 
         os.environ.get("COOKIES_TEXT") or 
@@ -93,34 +116,55 @@ def has_playable_video_formats(info):
     return False
 
 def extract_info_with_fallback(url, extra_opts=None):
-    strategies = [
-        # Strategy 1: Chrome TLS impersonation + cookies (if set)
-        get_base_ydl_options(extra_opts),
-        
-        # Strategy 2: Chrome TLS impersonation without cookiefile
-        {**get_base_ydl_options(extra_opts), 'cookiefile': None},
-        
-        # Strategy 3: Standard yt-dlp without impersonate
-        {**get_base_ydl_options(extra_opts), 'impersonate': None},
-        
-        # Strategy 4: Standard yt-dlp without impersonate & without cookiefile
-        {**get_base_ydl_options(extra_opts), 'impersonate': None, 'cookiefile': None}
-    ]
-
-    last_error = None
     download_flag = extra_opts.get('download', False) if extra_opts else False
 
-    for opts in strategies:
-        try:
-            opts_clean = {k: v for k, v in opts.items() if v is not None}
-            with yt_dlp.YoutubeDL(opts_clean) as ydl:
-                res = ydl.extract_info(url, download=download_flag)
-                if has_playable_video_formats(res):
-                    return res
-        except Exception as e:
-            last_error = e
+    # Strategy 1: Primary extraction with impersonation, proxy (if env set) & cookies
+    try:
+        opts = get_base_ydl_options(extra_opts)
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            res = ydl.extract_info(url, download=download_flag)
+            if has_playable_video_formats(res):
+                return res
+    except Exception:
+        pass
 
-    raise last_error if last_error else Exception("Failed to extract video information")
+    # Strategy 2: Primary extraction without cookiefile
+    try:
+        opts = get_base_ydl_options(extra_opts)
+        opts.pop('cookiefile', None)
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            res = ydl.extract_info(url, download=download_flag)
+            if has_playable_video_formats(res):
+                return res
+    except Exception:
+        pass
+
+    # Strategy 3: Dynamic Free Proxy Rotation (bypasses datacenter IP blocks on Render)
+    for _ in range(2):
+        proxy = get_free_proxy()
+        if proxy:
+            try:
+                opts = get_base_ydl_options(extra_opts)
+                opts['proxy'] = proxy
+                with yt_dlp.YoutubeDL(opts) as ydl:
+                    res = ydl.extract_info(url, download=download_flag)
+                    if has_playable_video_formats(res):
+                        return res
+            except Exception:
+                pass
+
+    # Strategy 4: Standard yt-dlp without impersonate
+    try:
+        opts = get_base_ydl_options(extra_opts)
+        opts.pop('impersonate', None)
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            res = ydl.extract_info(url, download=download_flag)
+            if res:
+                return res
+    except Exception as e:
+        last_error = e
+
+    raise last_error if 'last_error' in locals() else Exception("Failed to extract video information from YouTube.")
 
 def estimate_size_mb(fmt, duration):
     try:
@@ -147,10 +191,10 @@ def index():
 
 @app.route('/fetch-info', methods=['POST', 'OPTIONS'])
 def fetch_info():
-    if request.method == 'OPTIONS':
+    if flask_request.method == 'OPTIONS':
         return jsonify({}), 200
 
-    data = request.get_json() or {}
+    data = flask_request.get_json() or {}
     url = data.get('url', '').strip()
     
     if not url:
@@ -230,10 +274,10 @@ def fetch_info():
 
 @app.route('/get-download-link', methods=['POST', 'OPTIONS'])
 def get_download_link():
-    if request.method == 'OPTIONS':
+    if flask_request.method == 'OPTIONS':
         return jsonify({}), 200
 
-    data = request.get_json() or {}
+    data = flask_request.get_json() or {}
     url = data.get('url', '').strip()
     format_id = data.get('format_id', '').strip()
 
@@ -272,8 +316,8 @@ def get_download_link():
 
 @app.route('/download')
 def download_stream():
-    url = request.args.get('url', '').strip()
-    format_id = request.args.get('format_id', '').strip()
+    url = flask_request.args.get('url', '').strip()
+    format_id = flask_request.args.get('format_id', '').strip()
 
     if not url or not format_id:
         return jsonify({'error': 'URL and format_id query parameters are required.'}), 400
