@@ -2,8 +2,8 @@
 # Exit on error
 set -o errexit
 
-pip install --upgrade pip
-pip install -r requirements.txt
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
 
 # Download static FFmpeg binary on Linux if not installed
 if ! command -v ffmpeg &> /dev/null; then

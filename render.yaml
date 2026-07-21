@@ -3,7 +3,7 @@ services:
     name: youtube-downloader
     env: python
     buildCommand: "./build.sh"
-    startCommand: "gunicorn app:app"
+    startCommand: "python -m gunicorn app:app"
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.0
