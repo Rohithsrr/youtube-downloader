@@ -5,6 +5,11 @@ import traceback
 from flask import Flask, render_template, request, jsonify, send_file, after_this_request
 import yt_dlp
 
+# Add local ./bin directory to PATH if present (for static ffmpeg on Render)
+local_bin = os.path.join(os.path.dirname(__file__), 'bin')
+if os.path.exists(local_bin) and local_bin not in os.environ.get('PATH', ''):
+    os.environ['PATH'] = local_bin + os.path.pathsep + os.environ.get('PATH', '')
+
 try:
     from yt_dlp.networking.impersonate import ImpersonateTarget
     IMPERSONATE_CHROME = ImpersonateTarget('chrome')
@@ -13,26 +18,57 @@ except Exception:
 
 app = Flask(__name__)
 
-def get_ydl_options(extra_opts=None):
+def get_base_ydl_options(extra_opts=None):
     opts = {
         'quiet': True,
         'no_warnings': True,
         'impersonate': IMPERSONATE_CHROME,
     }
+    
+    # Support YouTube cookies via environment variable on Render/Cloud hosting
+    cookies_content = os.environ.get("YOUTUBE_COOKIES") or os.environ.get("COOKIES_TEXT")
+    if cookies_content and len(cookies_content.strip()) > 50:
+        cookie_file_path = os.path.join(tempfile.gettempdir(), 'yt_cookies.txt')
+        with open(cookie_file_path, 'w', encoding='utf-8') as f:
+            f.write(cookies_content)
+        opts['cookiefile'] = cookie_file_path
+
     if extra_opts:
         opts.update(extra_opts)
     return opts
 
 def extract_info_with_fallback(url, extra_opts=None):
-    ydl_opts = get_ydl_options(extra_opts)
+    # Strategy 1: Attempt standard extraction (uses cookies if set)
     try:
+        ydl_opts = get_base_ydl_options(extra_opts)
+        download_flag = extra_opts.get('download', False) if extra_opts else False
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            return ydl.extract_info(url, download=extra_opts.get('download', False) if extra_opts else False)
+            return ydl.extract_info(url, download=download_flag)
+    except Exception as e:
+        first_error = e
+
+    # Strategy 2: Fall back to iOS/Android player clients (bypasses bot block on cloud hosting)
+    try:
+        ydl_opts = get_base_ydl_options(extra_opts)
+        ydl_opts['extractor_args'] = {'youtube': {'player_client': ['ios', 'android']}}
+        download_flag = extra_opts.get('download', False) if extra_opts else False
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            return ydl.extract_info(url, download=download_flag)
+    except Exception as e:
+        second_error = e
+
+    # Strategy 3: Attempt without impersonate
+    try:
+        ydl_opts = get_base_ydl_options(extra_opts)
+        ydl_opts.pop('impersonate', None)
+        ydl_opts['extractor_args'] = {'youtube': {'player_client': ['ios', 'android']}}
+        download_flag = extra_opts.get('download', False) if extra_opts else False
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            return ydl.extract_info(url, download=download_flag)
     except Exception:
-        opts_fallback = dict(ydl_opts)
-        opts_fallback.pop('impersonate', None)
-        with yt_dlp.YoutubeDL(opts_fallback) as ydl:
-            return ydl.extract_info(url, download=extra_opts.get('download', False) if extra_opts else False)
+        pass
+
+    raise first_error
 
 def estimate_size_mb(fmt, duration):
     try:
@@ -187,7 +223,6 @@ def download_stream():
         final_path = mp4_path if os.path.exists(mp4_path) else None
         
         if not final_path:
-            # Find any created video file in temp_dir
             files = [os.path.join(temp_dir, f) for f in os.listdir(temp_dir)]
             if files:
                 final_path = files[0]
