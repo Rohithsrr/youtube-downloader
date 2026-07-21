@@ -49,6 +49,16 @@ def get_base_ydl_options(extra_opts=None):
         opts.update(extra_opts)
     return opts
 
+def has_playable_video_formats(info):
+    if not info or not info.get('formats'):
+        return False
+    for fmt in info.get('formats', []):
+        vcodec = fmt.get('vcodec')
+        ext = fmt.get('ext')
+        if vcodec and vcodec != 'none' and ext != 'mhtml':
+            return True
+    return False
+
 def extract_info_with_fallback(url, extra_opts=None):
     strategies = [
         # Strategy 1: Standard with impersonation & cookies
@@ -57,14 +67,20 @@ def extract_info_with_fallback(url, extra_opts=None):
         # Strategy 2: Without impersonate flag
         {**get_base_ydl_options(extra_opts), 'impersonate': None},
         
-        # Strategy 3: Android/iOS player clients (bypasses cloud hosting bot checks)
+        # Strategy 3: Local browser cookies fallback (Chrome, Firefox, Edge)
+        {**get_base_ydl_options(extra_opts), 'cookiesfrombrowser': ('chrome',)},
+        {**get_base_ydl_options(extra_opts), 'cookiesfrombrowser': ('firefox',)},
+        {**get_base_ydl_options(extra_opts), 'cookiesfrombrowser': ('edge',)},
+
+        # Strategy 4: Android/iOS player clients (guarantees playable video format on cloud hosting)
         {**get_base_ydl_options(extra_opts), 'extractor_args': {'youtube': {'player_client': ['android', 'ios']}}},
         
-        # Strategy 4: Android/iOS without impersonate
+        # Strategy 5: Android/iOS without impersonate
         {**get_base_ydl_options(extra_opts), 'impersonate': None, 'extractor_args': {'youtube': {'player_client': ['android', 'ios']}}}
     ]
 
     last_error = None
+    best_res = None
     download_flag = extra_opts.get('download', False) if extra_opts else False
 
     for opts in strategies:
@@ -72,12 +88,15 @@ def extract_info_with_fallback(url, extra_opts=None):
             opts_clean = {k: v for k, v in opts.items() if v is not None}
             with yt_dlp.YoutubeDL(opts_clean) as ydl:
                 res = ydl.extract_info(url, download=download_flag)
-                if res and res.get('formats'):
+                if has_playable_video_formats(res):
                     return res
-                if res:
-                    return res
+                if res and not best_res:
+                    best_res = res
         except Exception as e:
             last_error = e
+
+    if best_res:
+        return best_res
 
     raise last_error
 
