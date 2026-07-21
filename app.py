@@ -38,26 +38,32 @@ def get_base_ydl_options(extra_opts=None):
     return opts
 
 def extract_info_with_fallback(url, extra_opts=None):
-    # Strategy 1: Primary extraction with impersonation & cookies
-    try:
-        ydl_opts = get_base_ydl_options(extra_opts)
-        download_flag = extra_opts.get('download', False) if extra_opts else False
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            return ydl.extract_info(url, download=download_flag)
-    except Exception as e:
-        first_error = e
+    strategies = [
+        # Strategy 1: Standard with impersonation & cookies
+        get_base_ydl_options(extra_opts),
+        
+        # Strategy 2: Without impersonate flag
+        {**get_base_ydl_options(extra_opts), 'impersonate': None},
+        
+        # Strategy 3: Android/iOS player clients (bypasses cloud hosting bot checks)
+        {**get_base_ydl_options(extra_opts), 'extractor_args': {'youtube': {'player_client': ['android', 'ios']}}},
+        
+        # Strategy 4: Android/iOS without impersonate
+        {**get_base_ydl_options(extra_opts), 'impersonate': None, 'extractor_args': {'youtube': {'player_client': ['android', 'ios']}}}
+    ]
 
-    # Strategy 2: Fallback without impersonate flag
-    try:
-        ydl_opts = get_base_ydl_options(extra_opts)
-        ydl_opts.pop('impersonate', None)
-        download_flag = extra_opts.get('download', False) if extra_opts else False
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            return ydl.extract_info(url, download=download_flag)
-    except Exception:
-        pass
+    last_error = None
+    download_flag = extra_opts.get('download', False) if extra_opts else False
 
-    raise first_error
+    for opts in strategies:
+        try:
+            opts_clean = {k: v for k, v in opts.items() if v is not None}
+            with yt_dlp.YoutubeDL(opts_clean) as ydl:
+                return ydl.extract_info(url, download=download_flag)
+        except Exception as e:
+            last_error = e
+
+    raise last_error
 
 def estimate_size_mb(fmt, duration):
     try:
@@ -91,7 +97,7 @@ def fetch_info():
         return jsonify({'error': 'Please provide a valid YouTube URL.'}), 400
 
     try:
-        info = extract_info_with_fallback(url)
+        info = extract_info_with_fallback(url, {'format': 'all'})
             
         title = info.get('title', 'Unknown Title')
         thumbnail = info.get('thumbnail', '')
@@ -157,7 +163,7 @@ def get_download_link():
         return jsonify({'error': 'URL and format_id are required.'}), 400
 
     try:
-        format_rule = f"{format_id}+bestaudio/bestvideo+bestaudio/best" if format_id != 'best' else 'best'
+        format_rule = f"{format_id}+bestaudio/bestvideo+bestaudio/best/worst" if format_id != 'best' else 'best'
         info = extract_info_with_fallback(url, {'format': format_rule})
 
         direct_url = None
@@ -197,7 +203,7 @@ def download_stream():
     temp_dir = tempfile.mkdtemp()
     try:
         outtmpl = os.path.join(temp_dir, 'video.%(ext)s')
-        format_rule = f"{format_id}+bestaudio/bestvideo+bestaudio/best" if format_id != 'best' else 'best'
+        format_rule = f"{format_id}+bestaudio/bestvideo+bestaudio/best/worst" if format_id != 'best' else 'best'
         
         extra_opts = {
             'format': format_rule,
