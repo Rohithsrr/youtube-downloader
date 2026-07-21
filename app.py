@@ -1,4 +1,5 @@
 import os
+import random
 import shutil
 import tempfile
 import traceback
@@ -10,16 +11,15 @@ local_bin = os.path.join(os.path.dirname(__file__), 'bin')
 if os.path.exists(local_bin) and local_bin not in os.environ.get('PATH', ''):
     os.environ['PATH'] = local_bin + os.path.pathsep + os.environ.get('PATH', '')
 
-try:
-    from yt_dlp.networking.impersonate import ImpersonateTarget
-    IMPERSONATE_CHROME = ImpersonateTarget('chrome')
-except Exception:
-    IMPERSONATE_CHROME = 'chrome'
-
 app = Flask(__name__)
 
-# Single Primary Fast Webshare Residential Proxy
-PRIMARY_PROXY = 'http://jufzjzml:5ibfzrazhgap@31.59.20.176:6754'
+# Verified Working Webshare Residential Proxies
+WEBSHARE_PROXIES = [
+    'http://jufzjzml:5ibfzrazhgap@31.59.20.176:6754',
+    'http://jufzjzml:5ibfzrazhgap@31.56.127.193:7684',
+    'http://jufzjzml:5ibfzrazhgap@84.247.60.125:6095',
+    'http://jufzjzml:5ibfzrazhgap@191.96.254.138:6185',
+]
 
 DEFAULT_COOKIES = """# Netscape HTTP Cookie File
 .youtube.com	TRUE	/	TRUE	1798089081	VISITOR_PRIVACY_METADATA	CgJJThIEGgAgRg%3D%3D
@@ -81,8 +81,7 @@ def get_base_ydl_options(extra_opts=None):
     opts = {
         'quiet': True,
         'no_warnings': True,
-        'impersonate': IMPERSONATE_CHROME,
-        'socket_timeout': 3,
+        'socket_timeout': 4,
     }
     
     cookies_content = (
@@ -115,17 +114,22 @@ def has_playable_video_formats(info):
 
 def extract_info_with_fallback(url, extra_opts=None):
     download_flag = extra_opts.get('download', False) if extra_opts else False
+    errors = []
 
-    # Strategy 1: Primary Residential Proxy + Session Cookies
-    try:
-        opts = get_base_ydl_options(extra_opts)
-        opts['proxy'] = PRIMARY_PROXY
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            res = ydl.extract_info(url, download=download_flag)
-            if has_playable_video_formats(res):
-                return res
-    except Exception as e:
-        last_error = e
+    proxy_pool = WEBSHARE_PROXIES[:]
+    random.shuffle(proxy_pool)
+
+    # Strategy 1: Residential Proxy Pool + Session Cookies (Clean Python HTTP engine)
+    for proxy in proxy_pool[:2]:
+        try:
+            opts = get_base_ydl_options(extra_opts)
+            opts['proxy'] = proxy
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                res = ydl.extract_info(url, download=download_flag)
+                if has_playable_video_formats(res):
+                    return res
+        except Exception as e:
+            errors.append(str(e))
 
     # Strategy 2: Direct connection fallback
     try:
@@ -135,9 +139,10 @@ def extract_info_with_fallback(url, extra_opts=None):
             if has_playable_video_formats(res):
                 return res
     except Exception as e:
-        last_error = e
+        errors.append(str(e))
 
-    raise last_error if 'last_error' in locals() else Exception("Failed to extract video information from YouTube.")
+    err_summary = errors[-1] if errors else "Extraction failed"
+    raise Exception(err_summary)
 
 def estimate_size_mb(fmt, duration):
     try:
