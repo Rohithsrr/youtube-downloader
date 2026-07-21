@@ -72,7 +72,7 @@ def get_base_ydl_options(extra_opts=None):
         'quiet': True,
         'no_warnings': True,
         'impersonate': IMPERSONATE_CHROME,
-        'socket_timeout': 3,
+        'socket_timeout': 8,
     }
     
     cookies_content = (
@@ -121,12 +121,10 @@ def extract_info_with_fallback(url, extra_opts=None):
     if not proxy_pool:
         proxy_pool = WEBSHARE_PROXIES[:]
 
-    # Shuffle proxy pool & limit to top 2 fast attempts to avoid timeouts
     random.shuffle(proxy_pool)
-    fast_proxies = proxy_pool[:2]
 
-    # Strategy 1: Fast Residential Proxy attempts
-    for proxy in fast_proxies:
+    # Strategy 1: Iterate through residential proxies in pool
+    for proxy in proxy_pool:
         try:
             opts = get_base_ydl_options(extra_opts)
             opts['proxy'] = proxy
@@ -333,7 +331,7 @@ def download_stream():
                 final_path = files[0]
 
         if not final_path or not os.path.exists(final_path):
-            return jsonify({'error': 'Failed to process merged video file.'}), 400
+            return jsonify({'error': 'Failed to process merged video file.'}), 500
 
         title = info.get('title', 'video')
         safe_title = "".join([c for c in title if c.isalnum() or c in (' ', '-', '_')]).strip() or 'youtube_video'
