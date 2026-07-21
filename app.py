@@ -19,18 +19,12 @@ except Exception:
 
 app = Flask(__name__)
 
-# Webshare Residential Proxy Pool
+# Verified Working Webshare Residential Proxies
 WEBSHARE_PROXIES = [
     'http://jufzjzml:5ibfzrazhgap@31.59.20.176:6754',
     'http://jufzjzml:5ibfzrazhgap@31.56.127.193:7684',
     'http://jufzjzml:5ibfzrazhgap@84.247.60.125:6095',
     'http://jufzjzml:5ibfzrazhgap@191.96.254.138:6185',
-    'http://jufzjzml:5ibfzrazhgap@45.38.107.97:6014',
-    'http://jufzjzml:5ibfzrazhgap@198.105.121.200:6462',
-    'http://jufzjzml:5ibfzrazhgap@64.137.96.74:6641',
-    'http://jufzjzml:5ibfzrazhgap@198.23.243.226:6361',
-    'http://jufzjzml:5ibfzrazhgap@38.154.185.97:6370',
-    'http://jufzjzml:5ibfzrazhgap@142.111.67.146:5611',
 ]
 
 @app.after_request
@@ -78,6 +72,7 @@ def get_base_ydl_options(extra_opts=None):
         'quiet': True,
         'no_warnings': True,
         'impersonate': IMPERSONATE_CHROME,
+        'socket_timeout': 3,
     }
     
     cookies_content = (
@@ -109,6 +104,7 @@ def has_playable_video_formats(info):
 
 def extract_info_with_fallback(url, extra_opts=None):
     download_flag = extra_opts.get('download', False) if extra_opts else False
+    last_error = None
 
     proxy_pool = []
     proxy_env = os.environ.get("PROXY_URL") or os.environ.get("WEBSHARE_PROXIES")
@@ -125,26 +121,25 @@ def extract_info_with_fallback(url, extra_opts=None):
     if not proxy_pool:
         proxy_pool = WEBSHARE_PROXIES[:]
 
-    # Shuffle proxy pool to randomize load across working residential proxies
+    # Shuffle proxy pool & limit to top 2 fast attempts to avoid timeouts
     random.shuffle(proxy_pool)
+    fast_proxies = proxy_pool[:2]
 
-    # Strategy 1: Iterate through residential proxies
-    for proxy in proxy_pool:
+    # Strategy 1: Fast Residential Proxy attempts
+    for proxy in fast_proxies:
         try:
             opts = get_base_ydl_options(extra_opts)
             opts['proxy'] = proxy
-            opts['socket_timeout'] = 6
             with yt_dlp.YoutubeDL(opts) as ydl:
                 res = ydl.extract_info(url, download=download_flag)
                 if has_playable_video_formats(res):
                     return res
-        except Exception:
-            pass
+        except Exception as e:
+            last_error = e
 
-    # Strategy 2: Direct connection with cookies
+    # Strategy 2: Direct connection fallback
     try:
         opts = get_base_ydl_options(extra_opts)
-        opts.pop('proxy', None)
         with yt_dlp.YoutubeDL(opts) as ydl:
             res = ydl.extract_info(url, download=download_flag)
             if has_playable_video_formats(res):
@@ -152,7 +147,7 @@ def extract_info_with_fallback(url, extra_opts=None):
     except Exception as e:
         last_error = e
 
-    raise last_error if 'last_error' in locals() else Exception("Failed to extract video information from YouTube.")
+    raise last_error if last_error else Exception("Failed to extract video information from YouTube.")
 
 def estimate_size_mb(fmt, duration):
     try:
@@ -199,7 +194,6 @@ def fetch_info():
         quality_options = []
         seen_format_ids = set()
         
-        # Extract all video stream formats
         for fmt in formats:
             fmt_id = str(fmt.get('format_id'))
             if fmt_id in seen_format_ids:
@@ -230,7 +224,6 @@ def fetch_info():
                 'size': size_str
             })
 
-        # Fallback if no vcodec != 'none' formats found
         if not quality_options:
             for fmt in formats:
                 ext = fmt.get('ext', '')
@@ -263,7 +256,8 @@ def fetch_info():
 
     except Exception as e:
         traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
+        clean_err = str(e).encode('ascii', 'ignore').decode('ascii')
+        return jsonify({'error': clean_err or 'Failed to extract video details.'}), 400
 
 @app.route('/get-download-link', methods=['POST', 'OPTIONS'])
 def get_download_link():
@@ -296,7 +290,7 @@ def get_download_link():
                 direct_url = req_formats[0].get('url')
 
         if not direct_url:
-            return jsonify({'error': 'Could not extract direct stream URL.'}), 500
+            return jsonify({'error': 'Could not extract direct stream URL.'}), 400
 
         return jsonify({
             'download_url': direct_url,
@@ -305,7 +299,8 @@ def get_download_link():
 
     except Exception as e:
         traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
+        clean_err = str(e).encode('ascii', 'ignore').decode('ascii')
+        return jsonify({'error': clean_err or 'Failed to get stream URL.'}), 400
 
 @app.route('/download')
 def download_stream():
@@ -338,7 +333,7 @@ def download_stream():
                 final_path = files[0]
 
         if not final_path or not os.path.exists(final_path):
-            return jsonify({'error': 'Failed to process merged video file.'}), 500
+            return jsonify({'error': 'Failed to process merged video file.'}), 400
 
         title = info.get('title', 'video')
         safe_title = "".join([c for c in title if c.isalnum() or c in (' ', '-', '_')]).strip() or 'youtube_video'
@@ -367,7 +362,8 @@ def download_stream():
             shutil.rmtree(temp_dir, ignore_errors=True)
         except Exception:
             pass
-        return jsonify({'error': str(e)}), 500
+        clean_err = str(e).encode('ascii', 'ignore').decode('ascii')
+        return jsonify({'error': clean_err or 'Failed to download video.'}), 400
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
