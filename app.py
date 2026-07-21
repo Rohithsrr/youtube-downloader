@@ -38,7 +38,7 @@ def get_base_ydl_options(extra_opts=None):
     return opts
 
 def extract_info_with_fallback(url, extra_opts=None):
-    # Strategy 1: Attempt standard extraction (uses cookies if set)
+    # Strategy 1: Primary extraction with impersonation & cookies
     try:
         ydl_opts = get_base_ydl_options(extra_opts)
         download_flag = extra_opts.get('download', False) if extra_opts else False
@@ -47,21 +47,10 @@ def extract_info_with_fallback(url, extra_opts=None):
     except Exception as e:
         first_error = e
 
-    # Strategy 2: Fall back to iOS/Android player clients (bypasses bot block on cloud hosting)
-    try:
-        ydl_opts = get_base_ydl_options(extra_opts)
-        ydl_opts['extractor_args'] = {'youtube': {'player_client': ['ios', 'android']}}
-        download_flag = extra_opts.get('download', False) if extra_opts else False
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            return ydl.extract_info(url, download=download_flag)
-    except Exception as e:
-        second_error = e
-
-    # Strategy 3: Attempt without impersonate
+    # Strategy 2: Fallback without impersonate flag
     try:
         ydl_opts = get_base_ydl_options(extra_opts)
         ydl_opts.pop('impersonate', None)
-        ydl_opts['extractor_args'] = {'youtube': {'player_client': ['ios', 'android']}}
         download_flag = extra_opts.get('download', False) if extra_opts else False
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             return ydl.extract_info(url, download=download_flag)
@@ -168,7 +157,7 @@ def get_download_link():
         return jsonify({'error': 'URL and format_id are required.'}), 400
 
     try:
-        format_rule = f"{format_id}+bestaudio/best" if format_id != 'best' else 'best'
+        format_rule = f"{format_id}+bestaudio/bestvideo+bestaudio/best" if format_id != 'best' else 'best'
         info = extract_info_with_fallback(url, {'format': format_rule})
 
         direct_url = None
@@ -208,7 +197,7 @@ def download_stream():
     temp_dir = tempfile.mkdtemp()
     try:
         outtmpl = os.path.join(temp_dir, 'video.%(ext)s')
-        format_rule = f"{format_id}+bestaudio/best" if format_id != 'best' else 'best'
+        format_rule = f"{format_id}+bestaudio/bestvideo+bestaudio/best" if format_id != 'best' else 'best'
         
         extra_opts = {
             'format': format_rule,
