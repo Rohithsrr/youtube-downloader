@@ -18,12 +18,10 @@ except Exception:
 
 app = Flask(__name__)
 
-# Primary Fast Webshare Residential Proxies (HTTP & SOCKS5)
+# Fastest Verified Webshare Residential Proxies
 FAST_WEBSHARE_PROXIES = [
     'http://jufzjzml:5ibfzrazhgap@31.59.20.176:6754',
     'http://jufzjzml:5ibfzrazhgap@31.56.127.193:7684',
-    'socks5://jufzjzml:5ibfzrazhgap@31.59.20.176:6754',
-    'socks5://jufzjzml:5ibfzrazhgap@31.56.127.193:7684',
 ]
 
 @app.after_request
@@ -105,10 +103,8 @@ def extract_info_with_fallback(url, extra_opts=None):
     download_flag = extra_opts.get('download', False) if extra_opts else False
     errors = []
 
-    proxy_pool = FAST_WEBSHARE_PROXIES[:]
-
-    # Strategy 1: Primary Fast Residential Proxies
-    for proxy in proxy_pool:
+    # Strategy 1: Fast Residential Proxies (2 attempts max)
+    for proxy in FAST_WEBSHARE_PROXIES:
         try:
             opts = get_base_ydl_options(extra_opts)
             opts['proxy'] = proxy
@@ -119,7 +115,7 @@ def extract_info_with_fallback(url, extra_opts=None):
         except Exception as e:
             errors.append(str(e))
 
-    # Strategy 2: Direct connection with cookies
+    # Strategy 2: Direct connection with cookies fallback
     try:
         opts = get_base_ydl_options(extra_opts)
         with yt_dlp.YoutubeDL(opts) as ydl:
