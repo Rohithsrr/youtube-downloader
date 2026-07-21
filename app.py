@@ -1,6 +1,8 @@
 import os
+import shutil
+import tempfile
 import traceback
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify, send_file, after_this_request
 import yt_dlp
 
 try:
@@ -11,23 +13,41 @@ except Exception:
 
 app = Flask(__name__)
 
-def get_yt_dlp_options(extra_opts=None):
+def get_ydl_options(extra_opts=None):
     opts = {
         'quiet': True,
         'no_warnings': True,
-        'extract_flat': False,
         'impersonate': IMPERSONATE_CHROME,
     }
     if extra_opts:
         opts.update(extra_opts)
     return opts
 
-def format_filesize_mb(bytes_size, tbr=None, duration=None):
+def extract_info_with_fallback(url, extra_opts=None):
+    ydl_opts = get_ydl_options(extra_opts)
     try:
-        if bytes_size and float(bytes_size) > 0:
-            return round(float(bytes_size) / (1024 * 1024), 2)
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            return ydl.extract_info(url, download=extra_opts.get('download', False) if extra_opts else False)
+    except Exception:
+        opts_fallback = dict(ydl_opts)
+        opts_fallback.pop('impersonate', None)
+        with yt_dlp.YoutubeDL(opts_fallback) as ydl:
+            return ydl.extract_info(url, download=extra_opts.get('download', False) if extra_opts else False)
+
+def estimate_size_mb(fmt, duration):
+    try:
+        filesize = fmt.get('filesize') or fmt.get('filesize_approx')
+        if filesize and float(filesize) > 0:
+            return round(float(filesize) / (1024 * 1024), 2)
+        
+        tbr = fmt.get('tbr')
+        if not tbr:
+            vbr = fmt.get('vbr') or 0
+            abr = fmt.get('abr') or 0
+            tbr = (vbr + abr) if (vbr or abr) else None
+
         if tbr and duration and float(tbr) > 0 and float(duration) > 0:
-            estimated_bytes = (float(tbr) * 1000 * float(duration)) / 8
+            estimated_bytes = (float(tbr) * 1000.0 * float(duration)) / 8.0
             return round(estimated_bytes / (1024 * 1024), 2)
     except Exception:
         pass
@@ -46,86 +66,56 @@ def fetch_info():
         return jsonify({'error': 'Please provide a valid YouTube URL.'}), 400
 
     try:
-        ydl_opts = get_yt_dlp_options()
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
+        info = extract_info_with_fallback(url)
             
         title = info.get('title', 'Unknown Title')
         thumbnail = info.get('thumbnail', '')
         duration = info.get('duration', 0)
         formats = info.get('formats', [])
         
-        quality_options = []
-        seen_keys = set()
-
+        height_map = {}
         for fmt in formats:
-            format_id = fmt.get('format_id')
-            vcodec = fmt.get('vcodec')
-            acodec = fmt.get('acodec')
             height = fmt.get('height')
-            ext = fmt.get('ext', 'mp4')
-            fps = fmt.get('fps')
-            filesize = fmt.get('filesize') or fmt.get('filesize_approx')
-            
-            tbr = fmt.get('tbr')
-            if not tbr:
-                vbr = fmt.get('vbr') or 0
-                abr = fmt.get('abr') or 0
-                tbr = vbr + abr if (vbr or abr) else None
-
-            size_mb = format_filesize_mb(filesize, tbr, duration)
-            size_str = f"~{size_mb} MB" if size_mb else "Unknown size"
-
-            has_video = vcodec and vcodec != 'none'
-            has_audio = acodec and acodec != 'none'
-
-            # Check if format has video
-            if has_video and height:
-                try:
-                    fps_val = int(fps) if fps else 0
-                except Exception:
-                    fps_val = 0
-                
-                fps_text = f" {fps_val}fps" if fps_val > 30 else ""
-                label = f"{height}p{fps_text} ({ext.upper()})"
-                sort_val = int(height) * 100 + fps_val
-                type_name = "Video"
-                key = (height, ext, fps_val)
-            elif has_audio and not has_video:
-                abr_val = fmt.get('abr')
-                try:
-                    abr_text = f" ({int(abr_val)} kbps)" if abr_val else ""
-                except Exception:
-                    abr_text = ""
-
-                label = f"Audio Only{abr_text} ({ext.upper()})"
-                sort_val = 0
-                type_name = "Audio"
-                key = ('audio', format_id)
-            else:
+            vcodec = fmt.get('vcodec')
+            if not height or vcodec == 'none':
                 continue
-
-            if key not in seen_keys:
-                seen_keys.add(key)
-                quality_options.append({
-                    'format_id': str(format_id),
-                    'height': height or 0,
-                    'label': label,
+            
+            fmt_id = fmt.get('format_id')
+            fps = fmt.get('fps', 0) or 0
+            tbr = fmt.get('tbr', 0) or 0
+            ext = fmt.get('ext', 'mp4')
+            
+            size_mb = estimate_size_mb(fmt, duration)
+            
+            if height not in height_map or (tbr > height_map[height]['tbr']):
+                height_map[height] = {
+                    'format_id': str(fmt_id),
+                    'height': int(height),
+                    'fps': int(fps) if fps else 0,
                     'ext': ext,
-                    'size_mb': size_mb,
-                    'size_str': size_str,
-                    'type': type_name,
-                    'sort_val': sort_val
-                })
+                    'tbr': tbr,
+                    'size_mb': size_mb
+                }
 
-        # Sort options from highest quality to lowest
-        quality_options.sort(key=lambda x: x['sort_val'], reverse=True)
+        quality_options = []
+        for h in sorted(height_map.keys(), reverse=True):
+            item = height_map[h]
+            size_str = f"~{item['size_mb']} MB" if item['size_mb'] else "Unknown size"
+            fps_text = f" {item['fps']}fps" if item['fps'] > 30 else ""
+            label = f"{item['height']}p{fps_text} ({item['ext'].upper()})"
+            quality_options.append({
+                'format_id': item['format_id'],
+                'height': item['height'],
+                'label': label,
+                'size': size_str,
+                'size_mb': item['size_mb']
+            })
 
         return jsonify({
             'title': title,
             'thumbnail': thumbnail,
             'duration': duration,
-            'options': quality_options
+            'formats': quality_options
         })
 
     except Exception as e:
@@ -143,22 +133,17 @@ def get_download_link():
 
     try:
         format_rule = f"{format_id}+bestaudio/best" if format_id != 'best' else 'best'
-        ydl_opts = get_yt_dlp_options({'format': format_rule})
-
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
+        info = extract_info_with_fallback(url, {'format': format_rule})
 
         direct_url = None
 
-        # Check standard url
         if info.get('url'):
             direct_url = info.get('url')
-        # Check requested_formats array if merged format rule was requested
         elif info.get('requested_formats'):
             req_formats = info.get('requested_formats', [])
             for req in req_formats:
-                req_vcodec = req.get('vcodec')
-                if req_vcodec and req_vcodec != 'none' and req.get('url'):
+                vcodec = req.get('vcodec')
+                if vcodec and vcodec != 'none' and req.get('url'):
                     direct_url = req.get('url')
                     break
             if not direct_url and req_formats and req_formats[0].get('url'):
@@ -167,10 +152,76 @@ def get_download_link():
         if not direct_url:
             return jsonify({'error': 'Could not extract direct stream URL.'}), 500
 
-        return jsonify({'download_url': direct_url})
+        return jsonify({
+            'download_url': direct_url,
+            'url': direct_url
+        })
 
     except Exception as e:
         traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/download')
+def download_stream():
+    url = request.args.get('url', '').strip()
+    format_id = request.args.get('format_id', '').strip()
+
+    if not url or not format_id:
+        return jsonify({'error': 'URL and format_id query parameters are required.'}), 400
+
+    temp_dir = tempfile.mkdtemp()
+    try:
+        outtmpl = os.path.join(temp_dir, 'video.%(ext)s')
+        format_rule = f"{format_id}+bestaudio/best" if format_id != 'best' else 'best'
+        
+        extra_opts = {
+            'format': format_rule,
+            'merge_output_format': 'mp4',
+            'outtmpl': outtmpl,
+            'download': True
+        }
+        
+        info = extract_info_with_fallback(url, extra_opts)
+        
+        mp4_path = os.path.join(temp_dir, 'video.mp4')
+        final_path = mp4_path if os.path.exists(mp4_path) else None
+        
+        if not final_path:
+            # Find any created video file in temp_dir
+            files = [os.path.join(temp_dir, f) for f in os.listdir(temp_dir)]
+            if files:
+                final_path = files[0]
+
+        if not final_path or not os.path.exists(final_path):
+            return jsonify({'error': 'Failed to process merged video file.'}), 500
+
+        title = info.get('title', 'video')
+        safe_title = "".join([c for c in title if c.isalnum() or c in (' ', '-', '_')]).strip() or 'youtube_video'
+        height = info.get('height') or ''
+        height_str = f"_{height}p" if height else ''
+        download_name = f"{safe_title}{height_str}.mp4"
+
+        @after_this_request
+        def cleanup(response):
+            try:
+                shutil.rmtree(temp_dir, ignore_errors=True)
+            except Exception:
+                pass
+            return response
+
+        return send_file(
+            final_path,
+            as_attachment=True,
+            download_name=download_name,
+            mimetype='video/mp4'
+        )
+
+    except Exception as e:
+        traceback.print_exc()
+        try:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+        except Exception:
+            pass
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
