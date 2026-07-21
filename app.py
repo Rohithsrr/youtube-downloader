@@ -1,4 +1,5 @@
 import os
+import random
 import shutil
 import tempfile
 import traceback
@@ -172,17 +173,18 @@ def fetch_info():
         quality_options = []
         seen_format_ids = set()
         
+        # Pass 1: Video stream formats (vcodec != 'none')
         for fmt in formats:
-            fmt_id = str(fmt.get('format_id'))
-            if fmt_id in seen_format_ids:
-                continue
-
             ext = fmt.get('ext', '')
             if ext == 'mhtml' or ext == 'storyboard':
                 continue
 
             vcodec = fmt.get('vcodec', '')
             if not vcodec or vcodec == 'none':
+                continue
+
+            fmt_id = str(fmt.get('format_id'))
+            if fmt_id in seen_format_ids:
                 continue
 
             height = fmt.get('height') or 0
@@ -202,20 +204,22 @@ def fetch_info():
                 'size': size_str
             })
 
+        # Pass 2: Fallback for progressive / audio formats
         if not quality_options:
+            seen_fallback_ids = set()
             for fmt in formats:
                 ext = fmt.get('ext', '')
                 if ext == 'mhtml' or ext == 'storyboard':
                     continue
                 fmt_id = str(fmt.get('format_id'))
-                if fmt_id in seen_format_ids:
+                if fmt_id in seen_fallback_ids:
                     continue
                 height = fmt.get('height', 0) or 0
                 size_mb = estimate_size_mb(fmt, duration)
                 h_text = f"{height}p" if height > 0 else "Download"
                 label = f"{h_text} ({ext.upper() if ext else 'MP4'})"
                 size_str = f"~{size_mb} MB" if size_mb and size_mb > 0 else "Direct Stream"
-                seen_format_ids.add(fmt_id)
+                seen_fallback_ids.add(fmt_id)
                 quality_options.append({
                     'format_id': fmt_id,
                     'height': int(height),
