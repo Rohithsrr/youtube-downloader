@@ -75,7 +75,7 @@ def get_base_ydl_options(extra_opts=None):
     opts = {
         'quiet': True,
         'no_warnings': True,
-        'socket_timeout': 4,
+        'socket_timeout': 5,
     }
     
     cookies_content = (
@@ -87,8 +87,8 @@ def get_base_ydl_options(extra_opts=None):
     )
     clean_cookies = format_as_netscape_cookiefile(cookies_content)
     if clean_cookies:
-        cookie_file_path = os.path.join(tempfile.gettempdir(), 'yt_cookies.txt')
-        with open(cookie_file_path, 'w', encoding='utf-8') as f:
+        tmp_fd, cookie_file_path = tempfile.mkstemp(suffix='.txt', prefix='yt_cookies_')
+        with os.fdopen(tmp_fd, 'w', encoding='utf-8') as f:
             f.write(clean_cookies)
         opts['cookiefile'] = cookie_file_path
 
@@ -96,34 +96,56 @@ def get_base_ydl_options(extra_opts=None):
         opts.update(extra_opts)
     return opts
 
+def cleanup_opts_cookiefile(opts):
+    cookiefile = opts.get('cookiefile')
+    if cookiefile and os.path.exists(cookiefile):
+        try:
+            os.remove(cookiefile)
+        except Exception:
+            pass
+
 def extract_info_with_fallback(url, extra_opts=None):
     download_flag = extra_opts.get('download', False) if extra_opts else False
     errors = []
 
     # Strategy 1: Primary Residential Proxy + Session Cookies
+    opts1 = get_base_ydl_options(extra_opts)
+    opts1['proxy'] = PRIMARY_PROXY
     try:
-        opts = get_base_ydl_options(extra_opts)
-        opts['proxy'] = PRIMARY_PROXY
-        with yt_dlp.YoutubeDL(opts) as ydl:
+        with yt_dlp.YoutubeDL(opts1) as ydl:
             res = ydl.extract_info(url, download=download_flag)
             if res and res.get('formats'):
-                return res
+                stream_fmts = [f for f in res.get('formats', []) if f.get('ext') not in ('mhtml', 'storyboard')]
+                if stream_fmts:
+                    cleanup_opts_cookiefile(opts1)
+                    return res
+                else:
+                    errors.append(f"Proxy returned only {len(res.get('formats'))} storyboard formats")
             else:
                 errors.append("Proxy returned 0 formats")
     except Exception as e:
         errors.append(f"Proxy error: {str(e)}")
+    finally:
+        cleanup_opts_cookiefile(opts1)
 
     # Strategy 2: Direct connection fallback
+    opts2 = get_base_ydl_options(extra_opts)
     try:
-        opts = get_base_ydl_options(extra_opts)
-        with yt_dlp.YoutubeDL(opts) as ydl:
+        with yt_dlp.YoutubeDL(opts2) as ydl:
             res = ydl.extract_info(url, download=download_flag)
             if res and res.get('formats'):
-                return res
+                stream_fmts = [f for f in res.get('formats', []) if f.get('ext') not in ('mhtml', 'storyboard')]
+                if stream_fmts:
+                    cleanup_opts_cookiefile(opts2)
+                    return res
+                else:
+                    errors.append(f"Direct returned only {len(res.get('formats'))} storyboard formats")
             else:
                 errors.append("Direct returned 0 formats")
     except Exception as e:
         errors.append(f"Direct error: {str(e)}")
+    finally:
+        cleanup_opts_cookiefile(opts2)
 
     raise Exception(" | ".join(errors) if errors else "Extraction failed")
 
@@ -233,8 +255,6 @@ def fetch_info():
             'thumbnail': thumbnail,
             'duration': duration,
             'formats': quality_options,
-            'debug_raw_count': len(formats),
-            'debug_sample': [{'id': f.get('format_id'), 'vcodec': f.get('vcodec'), 'ext': f.get('ext')} for f in formats[:5]] if formats else []
         })
 
     except Exception as e:
