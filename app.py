@@ -1,4 +1,5 @@
 import os
+import random
 import shutil
 import tempfile
 import traceback
@@ -17,6 +18,20 @@ except Exception:
     IMPERSONATE_CHROME = 'chrome'
 
 app = Flask(__name__)
+
+# Webshare Residential Proxy Pool
+WEBSHARE_PROXIES = [
+    'http://jufzjzml:5ibfzrazhgap@31.59.20.176:6754',
+    'http://jufzjzml:5ibfzrazhgap@31.56.127.193:7684',
+    'http://jufzjzml:5ibfzrazhgap@84.247.60.125:6095',
+    'http://jufzjzml:5ibfzrazhgap@191.96.254.138:6185',
+    'http://jufzjzml:5ibfzrazhgap@45.38.107.97:6014',
+    'http://jufzjzml:5ibfzrazhgap@198.105.121.200:6462',
+    'http://jufzjzml:5ibfzrazhgap@64.137.96.74:6641',
+    'http://jufzjzml:5ibfzrazhgap@198.23.243.226:6361',
+    'http://jufzjzml:5ibfzrazhgap@38.154.185.97:6370',
+    'http://jufzjzml:5ibfzrazhgap@142.111.67.146:5611',
+]
 
 @app.after_request
 def add_cors_headers(response):
@@ -93,35 +108,51 @@ def has_playable_video_formats(info):
     return False
 
 def extract_info_with_fallback(url, extra_opts=None):
-    base_opts = get_base_ydl_options(extra_opts)
     download_flag = extra_opts.get('download', False) if extra_opts else False
 
-    strategies = [
-        # Strategy 1: Chrome TLS impersonation + cookies (if set)
-        base_opts,
-        
-        # Strategy 2: Without impersonate flag (using default TLS + cookies)
-        {k: v for k, v in base_opts.items() if k != 'impersonate'},
-        
-        # Strategy 3: Without cookiefile (if cookies were expired)
-        {k: v for k, v in base_opts.items() if k != 'cookiefile'},
-        
-        # Strategy 4: Clean default yt-dlp
-        {'quiet': True, 'no_warnings': True, 'socket_timeout': 10}
-    ]
+    proxy_pool = []
+    proxy_env = os.environ.get("PROXY_URL") or os.environ.get("WEBSHARE_PROXIES")
+    if proxy_env:
+        for p in proxy_env.split(','):
+            p = p.strip()
+            if p:
+                if len(p.split(':')) == 4:
+                    ip, port, user, pwd = p.split(':')
+                    proxy_pool.append(f"http://{user}:{pwd}@{ip}:{port}")
+                else:
+                    proxy_pool.append(p if p.startswith('http') else f"http://{p}")
 
-    last_error = None
+    if not proxy_pool:
+        proxy_pool = WEBSHARE_PROXIES[:]
 
-    for opts in strategies:
+    # Shuffle proxy pool to randomize load across working residential proxies
+    random.shuffle(proxy_pool)
+
+    # Strategy 1: Iterate through residential proxies
+    for proxy in proxy_pool:
         try:
+            opts = get_base_ydl_options(extra_opts)
+            opts['proxy'] = proxy
+            opts['socket_timeout'] = 6
             with yt_dlp.YoutubeDL(opts) as ydl:
                 res = ydl.extract_info(url, download=download_flag)
                 if has_playable_video_formats(res):
                     return res
-        except Exception as e:
-            last_error = e
+        except Exception:
+            pass
 
-    raise last_error if last_error else Exception("Failed to extract video information from YouTube.")
+    # Strategy 2: Direct connection with cookies
+    try:
+        opts = get_base_ydl_options(extra_opts)
+        opts.pop('proxy', None)
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            res = ydl.extract_info(url, download=download_flag)
+            if has_playable_video_formats(res):
+                return res
+    except Exception as e:
+        last_error = e
+
+    raise last_error if 'last_error' in locals() else Exception("Failed to extract video information from YouTube.")
 
 def estimate_size_mb(fmt, duration):
     try:

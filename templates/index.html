@@ -69,8 +69,8 @@
             <div class="flex items-center gap-2">
                 <label for="engine-select" class="text-xs text-dark-muted font-medium">Engine:</label>
                 <select id="engine-select" class="bg-dark-bg border border-dark-border rounded-lg px-3 py-1.5 text-xs text-dark-text font-mono focus-ring">
-                    <option value="local" selected>Local IP (127.0.0.1:5000) - Recommended</option>
-                    <option value="cloud">Render Cloud IP</option>
+                    <option value="cloud" selected>24/7 Residential Proxy Engine</option>
+                    <option value="local">Local IP (127.0.0.1:5000)</option>
                     <option value="custom">Custom IP / Tunnel URL</option>
                 </select>
             </div>
@@ -180,7 +180,7 @@
     <footer class="border-t border-dark-border bg-dark-card/30 py-6 mt-auto">
         <div class="max-w-3xl mx-auto px-4 text-center text-xs text-dark-muted space-y-1">
             <p>Private YouTube Stream Extractor — Built with Flask & Tailwind CSS</p>
-            <p class="font-mono text-dark-muted/80">Support for Personal Local IP & Render Cloud Engine</p>
+            <p class="font-mono text-dark-muted/80">Powered by 24/7 Residential Proxy Engine & Render Cloud</p>
         </div>
     </footer>
 
@@ -308,37 +308,21 @@
 
         async function fetchInfo(url) {
             const baseUrl = getApiBaseUrl();
-            try {
-                const res = await fetch(`${baseUrl}/fetch-info`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ url })
-                });
+            const res = await fetch(`${baseUrl}/fetch-info`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ url })
+            });
 
-                const contentType = res.headers.get('content-type') || '';
-                if (!contentType.includes('application/json')) {
-                    const text = await res.text();
-                    throw new Error(`Non-JSON response from server (${res.status})`);
-                }
-
-                const data = await res.json();
-                if (!res.ok) throw new Error(data.error || 'Failed to analyze YouTube video');
-                return data;
-            } catch (err) {
-                // If Local IP is offline/failed, fallback to current domain
-                if (engineSelect.value === 'local') {
-                    console.warn('Local IP unavailable, falling back to cloud engine...');
-                    const cloudRes = await fetch(`${window.location.origin}/fetch-info`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ url })
-                    });
-                    const cloudData = await cloudRes.json();
-                    if (!cloudRes.ok) throw new Error(cloudData.error || err.message);
-                    return cloudData;
-                }
-                throw err;
+            const contentType = res.headers.get('content-type') || '';
+            if (!contentType.includes('application/json')) {
+                const text = await res.text();
+                throw new Error(`Server returned non-JSON response (${res.status}): ${text.slice(0, 100)}`);
             }
+
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Failed to analyze YouTube video');
+            return data;
         }
 
         form.addEventListener('submit', async (e) => {
