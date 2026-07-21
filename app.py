@@ -102,21 +102,11 @@ def get_base_ydl_options(extra_opts=None):
         opts.update(extra_opts)
     return opts
 
-def has_playable_video_formats(info):
-    if not info or not info.get('formats'):
-        return False
-    for fmt in info.get('formats', []):
-        ext = fmt.get('ext')
-        if ext and ext != 'mhtml' and ext != 'storyboard':
-            return True
-    return False
-
 def extract_info_with_fallback(url, extra_opts=None):
     download_flag = extra_opts.get('download', False) if extra_opts else False
     errors = []
 
     proxy_pool = WEBSHARE_PROXIES[:]
-    random.shuffle(proxy_pool)
 
     # Strategy 1: Residential Proxy Pool + Session Cookies
     for proxy in proxy_pool:
@@ -125,26 +115,26 @@ def extract_info_with_fallback(url, extra_opts=None):
             opts['proxy'] = proxy
             with yt_dlp.YoutubeDL(opts) as ydl:
                 res = ydl.extract_info(url, download=download_flag)
-                if has_playable_video_formats(res):
+                if res and res.get('formats'):
                     return res
                 else:
-                    errors.append(f"Proxy ({proxy[:25]}): No stream formats")
+                    errors.append(f"P({proxy[7:22]}): No formats")
         except Exception as e:
-            errors.append(f"Proxy ({proxy[:25]}): {str(e)}")
+            errors.append(f"P({proxy[7:22]}): {str(e)[:40]}")
 
     # Strategy 2: Direct connection fallback
     try:
         opts = get_base_ydl_options(extra_opts)
         with yt_dlp.YoutubeDL(opts) as ydl:
             res = ydl.extract_info(url, download=download_flag)
-            if has_playable_video_formats(res):
+            if res and res.get('formats'):
                 return res
             else:
-                errors.append("Direct: No stream formats")
+                errors.append("Direct: No formats")
     except Exception as e:
-        errors.append(f"Direct: {str(e)}")
+        errors.append(f"Direct: {str(e)[:40]}")
 
-    err_summary = " | ".join(errors[-2:]) if errors else "Failed to extract video information from YouTube."
+    err_summary = " | ".join(errors) if errors else "Extraction failed"
     raise Exception(err_summary)
 
 def estimate_size_mb(fmt, duration):
