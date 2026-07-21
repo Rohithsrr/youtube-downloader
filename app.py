@@ -29,11 +29,11 @@ def add_cors_headers(response):
 
 def get_free_proxy():
     try:
-        res = requests.get('https://api.proxyscrape.com/v2/?request=getproxies&protocol=http&timeout=3000&country=all&ssl=all&anonymity=all', timeout=3)
+        res = requests.get('https://api.proxyscrape.com/v2/?request=getproxies&protocol=http&timeout=1500&country=all&ssl=all&anonymity=all', timeout=1.5)
         if res.ok and res.text:
             proxies = [p.strip() for p in res.text.splitlines() if p.strip()]
             if proxies:
-                return f"http://{random.choice(proxies[:15])}"
+                return f"http://{random.choice(proxies[:10])}"
     except Exception:
         pass
     return None
@@ -76,9 +76,9 @@ def get_base_ydl_options(extra_opts=None):
         'quiet': True,
         'no_warnings': True,
         'impersonate': IMPERSONATE_CHROME,
+        'socket_timeout': 8,
     }
     
-    # Configure Proxy from Environment Variables if set
     proxy_env = (
         os.environ.get("PROXY_URL") or 
         os.environ.get("HTTP_PROXY") or 
@@ -117,16 +117,17 @@ def has_playable_video_formats(info):
 
 def extract_info_with_fallback(url, extra_opts=None):
     download_flag = extra_opts.get('download', False) if extra_opts else False
+    last_error = None
 
-    # Strategy 1: Primary extraction with impersonation, proxy (if env set) & cookies
+    # Strategy 1: Primary extraction with impersonation & cookies
     try:
         opts = get_base_ydl_options(extra_opts)
         with yt_dlp.YoutubeDL(opts) as ydl:
             res = ydl.extract_info(url, download=download_flag)
             if has_playable_video_formats(res):
                 return res
-    except Exception:
-        pass
+    except Exception as e:
+        last_error = e
 
     # Strategy 2: Primary extraction without cookiefile
     try:
@@ -136,22 +137,23 @@ def extract_info_with_fallback(url, extra_opts=None):
             res = ydl.extract_info(url, download=download_flag)
             if has_playable_video_formats(res):
                 return res
-    except Exception:
-        pass
+    except Exception as e:
+        last_error = e
 
-    # Strategy 3: Dynamic Free Proxy Rotation (bypasses datacenter IP blocks on Render)
-    for _ in range(2):
+    # Strategy 3: Fast Proxy attempt (if PROXY_URL set or fast proxy available)
+    if not os.environ.get("PROXY_URL"):
         proxy = get_free_proxy()
         if proxy:
             try:
                 opts = get_base_ydl_options(extra_opts)
                 opts['proxy'] = proxy
+                opts['socket_timeout'] = 4
                 with yt_dlp.YoutubeDL(opts) as ydl:
                     res = ydl.extract_info(url, download=download_flag)
                     if has_playable_video_formats(res):
                         return res
-            except Exception:
-                pass
+            except Exception as e:
+                last_error = e
 
     # Strategy 4: Standard yt-dlp without impersonate
     try:
@@ -164,7 +166,7 @@ def extract_info_with_fallback(url, extra_opts=None):
     except Exception as e:
         last_error = e
 
-    raise last_error if 'last_error' in locals() else Exception("Failed to extract video information from YouTube.")
+    raise last_error if last_error else Exception("Failed to extract video information from YouTube.")
 
 def estimate_size_mb(fmt, duration):
     try:
