@@ -12,11 +12,8 @@ if os.path.exists(local_bin) and local_bin not in os.environ.get('PATH', ''):
 
 app = Flask(__name__)
 
-# Verified Working Sticky Residential Proxies (Top 2 for fast sub-3s response)
-VERIFIED_STICKY_PROXIES = [
-    'http://jufzjzml:5ibfzrazhgap@31.59.20.176:6754',
-    'http://jufzjzml:5ibfzrazhgap@31.56.127.193:7684',
-]
+# Primary Residential Proxy
+PRIMARY_PROXY = 'http://jufzjzml:5ibfzrazhgap@31.59.20.176:6754'
 
 DEFAULT_COOKIES = """# Netscape HTTP Cookie File
 .youtube.com	TRUE	/	TRUE	1798089081	VISITOR_PRIVACY_METADATA	CgJJThIEGgAgRg%3D%3D
@@ -78,7 +75,7 @@ def get_base_ydl_options(extra_opts=None):
     opts = {
         'quiet': True,
         'no_warnings': True,
-        'socket_timeout': 3,
+        'socket_timeout': 4,
     }
     
     cookies_content = (
@@ -109,28 +106,22 @@ def cleanup_opts_cookiefile(opts):
 
 def extract_info_with_fallback(url, extra_opts=None):
     download_flag = extra_opts.get('download', False) if extra_opts else False
-    errors = []
 
-    # Strategy 1: Top 2 Verified Sticky Residential Proxies
-    for proxy in VERIFIED_STICKY_PROXIES:
-        opts = get_base_ydl_options(extra_opts)
-        opts['proxy'] = proxy
-        try:
-            with yt_dlp.YoutubeDL(opts) as ydl:
-                res = ydl.extract_info(url, download=download_flag)
-                if res and res.get('formats'):
-                    stream_fmts = [f for f in res.get('formats', []) if f.get('ext') not in ('mhtml', 'storyboard')]
-                    if stream_fmts:
-                        cleanup_opts_cookiefile(opts)
-                        return res
-                    else:
-                        errors.append(f"Proxy ({proxy[31:45]}): Only storyboards")
-                else:
-                    errors.append(f"Proxy ({proxy[31:45]}): 0 formats")
-        except Exception as e:
-            errors.append(f"Proxy ({proxy[31:45]}): {str(e)[:40]}")
-        finally:
-            cleanup_opts_cookiefile(opts)
+    # Strategy 1: Primary Residential Proxy + Session Cookies
+    opts1 = get_base_ydl_options(extra_opts)
+    opts1['proxy'] = PRIMARY_PROXY
+    try:
+        with yt_dlp.YoutubeDL(opts1) as ydl:
+            res = ydl.extract_info(url, download=download_flag)
+            if res and res.get('formats'):
+                stream_fmts = [f for f in res.get('formats', []) if f.get('ext') not in ('mhtml', 'storyboard')]
+                if stream_fmts:
+                    cleanup_opts_cookiefile(opts1)
+                    return res
+    except Exception as e:
+        proxy_err = str(e)
+    finally:
+        cleanup_opts_cookiefile(opts1)
 
     # Strategy 2: Direct connection fallback
     opts2 = get_base_ydl_options(extra_opts)
@@ -142,16 +133,14 @@ def extract_info_with_fallback(url, extra_opts=None):
                 if stream_fmts:
                     cleanup_opts_cookiefile(opts2)
                     return res
-                else:
-                    errors.append("Direct: Only storyboards")
-            else:
-                errors.append("Direct: 0 formats")
     except Exception as e:
-        errors.append(f"Direct: {str(e)[:40]}")
+        direct_err = str(e)
     finally:
         cleanup_opts_cookiefile(opts2)
 
-    raise Exception(" | ".join(errors) if errors else "Extraction failed")
+    p_err = proxy_err if 'proxy_err' in locals() else 'Proxy returned 0 formats'
+    d_err = direct_err if 'direct_err' in locals() else 'Direct returned 0 formats'
+    raise Exception(f"Proxy Failed ({p_err}) | Direct Failed ({d_err})")
 
 def estimate_size_mb(fmt, duration):
     try:
