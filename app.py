@@ -21,7 +21,7 @@ app = Flask(__name__)
 def format_as_netscape_cookiefile(text):
     if not text:
         return None
-    clean = text.replace('\\n', '\n').replace('\\r', '').replace('\\t', '\t')
+    clean = text.strip().strip('\'"').replace('\\n', '\n').replace('\\r', '').replace('\\t', '\t')
     out_lines = [
         '# Netscape HTTP Cookie File',
         '# https://curl.haxx.se/rfc/cookie_spec.html',
@@ -29,7 +29,7 @@ def format_as_netscape_cookiefile(text):
     ]
     
     for line in clean.splitlines():
-        line = line.strip()
+        line = line.strip().strip('\'"')
         if not line or line.startswith('#'):
             continue
             
@@ -58,7 +58,12 @@ def get_base_ydl_options(extra_opts=None):
         'impersonate': IMPERSONATE_CHROME,
     }
     
-    cookies_content = os.environ.get("YOUTUBE_COOKIES") or os.environ.get("COOKIES_TEXT")
+    cookies_content = (
+        os.environ.get("YOUTUBE_COOKIES") or 
+        os.environ.get("COOKIES_TEXT") or 
+        os.environ.get("COOKIES") or 
+        os.environ.get("YT_COOKIES")
+    )
     clean_cookies = format_as_netscape_cookiefile(cookies_content)
     if clean_cookies:
         cookie_file_path = os.path.join(tempfile.gettempdir(), 'yt_cookies.txt')
