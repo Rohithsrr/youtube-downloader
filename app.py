@@ -10,6 +10,12 @@ local_bin = os.path.join(os.path.dirname(__file__), 'bin')
 if os.path.exists(local_bin) and local_bin not in os.environ.get('PATH', ''):
     os.environ['PATH'] = local_bin + os.path.pathsep + os.environ.get('PATH', '')
 
+try:
+    from yt_dlp.networking.impersonate import ImpersonateTarget
+    IMPERSONATE_CHROME = ImpersonateTarget('chrome')
+except Exception:
+    IMPERSONATE_CHROME = 'chrome'
+
 app = Flask(__name__)
 
 def get_clean_cookies_text(text):
@@ -28,6 +34,7 @@ def get_base_ydl_options(extra_opts=None):
     opts = {
         'quiet': True,
         'no_warnings': True,
+        'impersonate': IMPERSONATE_CHROME,
     }
     
     cookies_content = os.environ.get("YOUTUBE_COOKIES") or os.environ.get("COOKIES_TEXT")
@@ -53,29 +60,32 @@ def has_playable_video_formats(info):
     return False
 
 def extract_info_with_fallback(url, extra_opts=None):
+    strategies = [
+        # Strategy 1: Chrome TLS impersonation + cookies (if set)
+        get_base_ydl_options(extra_opts),
+        
+        # Strategy 2: Chrome TLS impersonation without cookiefile
+        {**get_base_ydl_options(extra_opts), 'cookiefile': None},
+        
+        # Strategy 3: Standard yt-dlp without impersonate
+        {**get_base_ydl_options(extra_opts), 'impersonate': None},
+        
+        # Strategy 4: Standard yt-dlp without impersonate & without cookiefile
+        {**get_base_ydl_options(extra_opts), 'impersonate': None, 'cookiefile': None}
+    ]
+
     last_error = None
     download_flag = extra_opts.get('download', False) if extra_opts else False
 
-    # Strategy 1: Clean yt-dlp with cookies if set
-    try:
-        opts1 = get_base_ydl_options(extra_opts)
-        with yt_dlp.YoutubeDL(opts1) as ydl:
-            res = ydl.extract_info(url, download=download_flag)
-            if has_playable_video_formats(res):
-                return res
-    except Exception as e:
-        last_error = e
-
-    # Strategy 2: Without cookiefile (in case cookies are expired/invalid)
-    try:
-        opts2 = get_base_ydl_options(extra_opts)
-        opts2.pop('cookiefile', None)
-        with yt_dlp.YoutubeDL(opts2) as ydl:
-            res = ydl.extract_info(url, download=download_flag)
-            if res:
-                return res
-    except Exception as e:
-        last_error = e
+    for opts in strategies:
+        try:
+            opts_clean = {k: v for k, v in opts.items() if v is not None}
+            with yt_dlp.YoutubeDL(opts_clean) as ydl:
+                res = ydl.extract_info(url, download=download_flag)
+                if has_playable_video_formats(res):
+                    return res
+        except Exception as e:
+            last_error = e
 
     raise last_error if last_error else Exception("Failed to extract video information")
 
