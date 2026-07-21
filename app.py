@@ -18,6 +18,12 @@ except Exception:
 
 app = Flask(__name__)
 
+def is_valid_cookie_text(text):
+    if not text or len(text.strip()) < 50:
+        return False
+    lines = [line.strip() for line in text.splitlines() if line.strip() and not line.strip().startswith('#')]
+    return any('youtube' in line.lower() for line in lines)
+
 def get_base_ydl_options(extra_opts=None):
     opts = {
         'quiet': True,
@@ -25,9 +31,8 @@ def get_base_ydl_options(extra_opts=None):
         'impersonate': IMPERSONATE_CHROME,
     }
     
-    # Support YouTube cookies via environment variable on Render/Cloud hosting
     cookies_content = os.environ.get("YOUTUBE_COOKIES") or os.environ.get("COOKIES_TEXT")
-    if cookies_content and len(cookies_content.strip()) > 50:
+    if is_valid_cookie_text(cookies_content):
         cookie_file_path = os.path.join(tempfile.gettempdir(), 'yt_cookies.txt')
         with open(cookie_file_path, 'w', encoding='utf-8') as f:
             f.write(cookies_content)
@@ -59,7 +64,11 @@ def extract_info_with_fallback(url, extra_opts=None):
         try:
             opts_clean = {k: v for k, v in opts.items() if v is not None}
             with yt_dlp.YoutubeDL(opts_clean) as ydl:
-                return ydl.extract_info(url, download=download_flag)
+                res = ydl.extract_info(url, download=download_flag)
+                if res and res.get('formats'):
+                    return res
+                if res:
+                    return res
         except Exception as e:
             last_error = e
 
@@ -106,10 +115,21 @@ def fetch_info():
         
         height_map = {}
         for fmt in formats:
-            height = fmt.get('height')
             vcodec = fmt.get('vcodec')
-            if not height or vcodec == 'none':
+            if vcodec == 'none':
                 continue
+
+            height = fmt.get('height')
+            if not height:
+                fmt_note = str(fmt.get('format_note', ''))
+                res_str = str(fmt.get('resolution', ''))
+                for val in [fmt_note, res_str]:
+                    if 'p' in val:
+                        try:
+                            height = int(val.lower().split('p')[0])
+                            break
+                        except Exception:
+                            pass
             
             fmt_id = fmt.get('format_id')
             fps = fmt.get('fps', 0) or 0
@@ -118,22 +138,43 @@ def fetch_info():
             
             size_mb = estimate_size_mb(fmt, duration)
             
-            if height not in height_map or (tbr > height_map[height]['tbr']):
-                height_map[height] = {
+            key_h = height if height else (fmt_id if fmt_id else 'best')
+            
+            if key_h not in height_map or (tbr > height_map[key_h]['tbr']):
+                height_map[key_h] = {
                     'format_id': str(fmt_id),
-                    'height': int(height),
+                    'height': int(height) if height else 0,
                     'fps': int(fps) if fps else 0,
                     'ext': ext,
                     'tbr': tbr,
                     'size_mb': size_mb
                 }
 
+        # Fallback if no vcodec != 'none' formats found (e.g. progressive or restricted streams)
+        if not height_map:
+            for fmt in formats:
+                ext = fmt.get('ext', '')
+                if ext == 'mhtml':
+                    continue
+                fmt_id = fmt.get('format_id')
+                height = fmt.get('height', 0) or 0
+                size_mb = estimate_size_mb(fmt, duration)
+                height_map[fmt_id] = {
+                    'format_id': str(fmt_id),
+                    'height': height,
+                    'fps': 0,
+                    'ext': ext if ext else 'mp4',
+                    'tbr': fmt.get('tbr', 0) or 0,
+                    'size_mb': size_mb
+                }
+
         quality_options = []
-        for h in sorted(height_map.keys(), reverse=True):
+        for h in sorted(height_map.keys(), key=lambda x: height_map[x]['height'], reverse=True):
             item = height_map[h]
             size_str = f"~{item['size_mb']} MB" if item['size_mb'] else "Unknown size"
             fps_text = f" {item['fps']}fps" if item['fps'] > 30 else ""
-            label = f"{item['height']}p{fps_text} ({item['ext'].upper()})"
+            height_label = f"{item['height']}p" if item['height'] > 0 else "Standard Quality"
+            label = f"{height_label}{fps_text} ({item['ext'].upper()})"
             quality_options.append({
                 'format_id': item['format_id'],
                 'height': item['height'],
