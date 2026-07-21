@@ -1,9 +1,7 @@
 import os
-import random
 import shutil
 import tempfile
 import traceback
-import requests
 from flask import Flask, render_template, request as flask_request, jsonify, send_file, after_this_request
 import yt_dlp
 
@@ -26,17 +24,6 @@ def add_cors_headers(response):
     response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization'
     response.headers['Access-Control-Allow-Methods'] = 'GET,POST,OPTIONS'
     return response
-
-def get_free_proxy():
-    try:
-        res = requests.get('https://api.proxyscrape.com/v2/?request=getproxies&protocol=http&timeout=1500&country=all&ssl=all&anonymity=all', timeout=1.5)
-        if res.ok and res.text:
-            proxies = [p.strip() for p in res.text.splitlines() if p.strip()]
-            if proxies:
-                return f"http://{random.choice(proxies[:10])}"
-    except Exception:
-        pass
-    return None
 
 def format_as_netscape_cookiefile(text):
     if not text:
@@ -76,17 +63,7 @@ def get_base_ydl_options(extra_opts=None):
         'quiet': True,
         'no_warnings': True,
         'impersonate': IMPERSONATE_CHROME,
-        'socket_timeout': 8,
     }
-    
-    proxy_env = (
-        os.environ.get("PROXY_URL") or 
-        os.environ.get("HTTP_PROXY") or 
-        os.environ.get("HTTPS_PROXY") or 
-        os.environ.get("PROXIES")
-    )
-    if proxy_env:
-        opts['proxy'] = proxy_env.strip()
     
     cookies_content = (
         os.environ.get("YOUTUBE_COOKIES") or 
@@ -111,60 +88,38 @@ def has_playable_video_formats(info):
     for fmt in info.get('formats', []):
         vcodec = fmt.get('vcodec')
         ext = fmt.get('ext')
-        if vcodec and vcodec != 'none' and ext != 'mhtml':
+        if vcodec and vcodec != 'none' and ext != 'mhtml' and ext != 'storyboard':
             return True
     return False
 
 def extract_info_with_fallback(url, extra_opts=None):
+    base_opts = get_base_ydl_options(extra_opts)
     download_flag = extra_opts.get('download', False) if extra_opts else False
+
+    strategies = [
+        # Strategy 1: Chrome TLS impersonation + cookies (if set)
+        base_opts,
+        
+        # Strategy 2: Without impersonate flag (using default TLS + cookies)
+        {k: v for k, v in base_opts.items() if k != 'impersonate'},
+        
+        # Strategy 3: Without cookiefile (if cookies were expired)
+        {k: v for k, v in base_opts.items() if k != 'cookiefile'},
+        
+        # Strategy 4: Clean default yt-dlp
+        {'quiet': True, 'no_warnings': True, 'socket_timeout': 10}
+    ]
+
     last_error = None
 
-    # Strategy 1: Primary extraction with impersonation & cookies
-    try:
-        opts = get_base_ydl_options(extra_opts)
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            res = ydl.extract_info(url, download=download_flag)
-            if has_playable_video_formats(res):
-                return res
-    except Exception as e:
-        last_error = e
-
-    # Strategy 2: Primary extraction without cookiefile
-    try:
-        opts = get_base_ydl_options(extra_opts)
-        opts.pop('cookiefile', None)
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            res = ydl.extract_info(url, download=download_flag)
-            if has_playable_video_formats(res):
-                return res
-    except Exception as e:
-        last_error = e
-
-    # Strategy 3: Fast Proxy attempt (if PROXY_URL set or fast proxy available)
-    if not os.environ.get("PROXY_URL"):
-        proxy = get_free_proxy()
-        if proxy:
-            try:
-                opts = get_base_ydl_options(extra_opts)
-                opts['proxy'] = proxy
-                opts['socket_timeout'] = 4
-                with yt_dlp.YoutubeDL(opts) as ydl:
-                    res = ydl.extract_info(url, download=download_flag)
-                    if has_playable_video_formats(res):
-                        return res
-            except Exception as e:
-                last_error = e
-
-    # Strategy 4: Standard yt-dlp without impersonate
-    try:
-        opts = get_base_ydl_options(extra_opts)
-        opts.pop('impersonate', None)
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            res = ydl.extract_info(url, download=download_flag)
-            if res:
-                return res
-    except Exception as e:
-        last_error = e
+    for opts in strategies:
+        try:
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                res = ydl.extract_info(url, download=download_flag)
+                if has_playable_video_formats(res):
+                    return res
+        except Exception as e:
+            last_error = e
 
     raise last_error if last_error else Exception("Failed to extract video information from YouTube.")
 
@@ -172,7 +127,7 @@ def estimate_size_mb(fmt, duration):
     try:
         filesize = fmt.get('filesize') or fmt.get('filesize_approx')
         if filesize and float(filesize) > 0:
-            return round(float(filesize) / (1024 * 1024), 2)
+            return round(float(filesize) / (1024 * 1024), 1)
         
         tbr = fmt.get('tbr')
         if not tbr:
@@ -182,7 +137,7 @@ def estimate_size_mb(fmt, duration):
 
         if tbr and duration and float(tbr) > 0 and float(duration) > 0:
             estimated_bytes = (float(tbr) * 1000.0 * float(duration)) / 8.0
-            return round(estimated_bytes / (1024 * 1024), 2)
+            return round(estimated_bytes / (1024 * 1024), 1)
     except Exception:
         pass
     return None
@@ -211,54 +166,59 @@ def fetch_info():
         formats = info.get('formats', [])
         
         quality_options = []
-        seen_heights = set()
+        seen_format_ids = set()
         
-        # Pass 1: Extract video formats with vcodec != 'none'
+        # Extract all video stream formats
         for fmt in formats:
-            vcodec = fmt.get('vcodec')
-            if vcodec == 'none' or not vcodec:
+            fmt_id = str(fmt.get('format_id'))
+            if fmt_id in seen_format_ids:
+                continue
+
+            ext = fmt.get('ext', '')
+            if ext == 'mhtml' or ext == 'storyboard':
+                continue
+
+            vcodec = fmt.get('vcodec', '')
+            if not vcodec or vcodec == 'none':
                 continue
 
             height = fmt.get('height') or 0
-            fmt_id = fmt.get('format_id')
             fps = fmt.get('fps', 0) or 0
-            ext = fmt.get('ext', 'mp4')
             size_mb = estimate_size_mb(fmt, duration)
 
             h_text = f"{height}p" if height > 0 else "Video"
             fps_text = f" {int(fps)}fps" if fps > 30 else ""
             label = f"{h_text}{fps_text} ({ext.upper()})"
-            size_str = f"~{size_mb} MB" if size_mb else "Unknown size"
-            
-            key = (height, ext)
-            if key not in seen_heights:
-                seen_heights.add(key)
-                quality_options.append({
-                    'format_id': str(fmt_id),
-                    'height': int(height),
-                    'label': label,
-                    'size': size_str,
-                    'size_mb': size_mb
-                })
+            size_str = f"~{size_mb} MB" if size_mb and size_mb > 0 else "Direct Stream"
 
-        # Pass 2: Fallback if no vcodec != 'none' formats found
+            seen_format_ids.add(fmt_id)
+            quality_options.append({
+                'format_id': fmt_id,
+                'height': int(height),
+                'label': label,
+                'size': size_str
+            })
+
+        # Fallback if no vcodec != 'none' formats found
         if not quality_options:
             for fmt in formats:
                 ext = fmt.get('ext', '')
                 if ext == 'mhtml' or ext == 'storyboard':
                     continue
-                fmt_id = fmt.get('format_id')
+                fmt_id = str(fmt.get('format_id'))
+                if fmt_id in seen_format_ids:
+                    continue
                 height = fmt.get('height', 0) or 0
                 size_mb = estimate_size_mb(fmt, duration)
                 h_text = f"{height}p" if height > 0 else "Download"
                 label = f"{h_text} ({ext.upper() if ext else 'MP4'})"
-                size_str = f"~{size_mb} MB" if size_mb else "Unknown size"
+                size_str = f"~{size_mb} MB" if size_mb and size_mb > 0 else "Direct Stream"
+                seen_format_ids.add(fmt_id)
                 quality_options.append({
-                    'format_id': str(fmt_id),
+                    'format_id': fmt_id,
                     'height': int(height),
                     'label': label,
-                    'size': size_str,
-                    'size_mb': size_mb
+                    'size': size_str
                 })
 
         quality_options.sort(key=lambda x: x['height'], reverse=True)
