@@ -69,10 +69,18 @@
             <div class="flex items-center gap-2">
                 <label for="engine-select" class="text-xs text-dark-muted font-medium">Engine:</label>
                 <select id="engine-select" class="bg-dark-bg border border-dark-border rounded-lg px-3 py-1.5 text-xs text-dark-text font-mono focus-ring">
-                    <option value="auto">Auto (Default)</option>
-                    <option value="local">Localhost (http://127.0.0.1:5000)</option>
-                    <option value="current">Current Domain</option>
+                    <option value="local" selected>Local IP (127.0.0.1:5000) - Recommended</option>
+                    <option value="cloud">Render Cloud IP</option>
+                    <option value="custom">Custom IP / Tunnel URL</option>
                 </select>
+            </div>
+        </div>
+        
+        <!-- Custom IP input field (hidden by default unless selected) -->
+        <div id="custom-ip-container" class="hidden border-t border-dark-border bg-dark-bg/80 px-4 py-2">
+            <div class="max-w-3xl mx-auto flex items-center gap-2">
+                <span class="text-xs text-dark-muted">Custom Engine URL:</span>
+                <input type="text" id="custom-ip-input" placeholder="http://192.168.1.5:5000 or https://xyz.loca.lt" class="flex-1 bg-dark-card border border-dark-border rounded px-2.5 py-1 text-xs font-mono text-dark-text focus-ring">
             </div>
         </div>
     </header>
@@ -164,14 +172,6 @@
                         <p id="error-message" class="text-xs text-red-300/90 mt-1"></p>
                     </div>
                 </div>
-
-                <!-- Local Engine Switch Banner -->
-                <div id="local-engine-banner" class="hidden pt-3 border-t border-red-800/40 text-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-red-950/60 p-3 rounded-lg">
-                    <span>💡 YouTube blocked Render's cloud IP. Switch to your Local Engine to bypass bot checks!</span>
-                    <button id="switch-local-btn" class="bg-blue-600 hover:bg-blue-500 text-white font-semibold px-3 py-1.5 rounded text-xs transition-colors flex-shrink-0">
-                        Use Local Engine (http://127.0.0.1:5000)
-                    </button>
-                </div>
             </div>
         </section>
     </main>
@@ -180,7 +180,7 @@
     <footer class="border-t border-dark-border bg-dark-card/30 py-6 mt-auto">
         <div class="max-w-3xl mx-auto px-4 text-center text-xs text-dark-muted space-y-1">
             <p>Private YouTube Stream Extractor — Built with Flask & Tailwind CSS</p>
-            <p class="font-mono text-dark-muted/80">Support for Render Cloud & Local Engine</p>
+            <p class="font-mono text-dark-muted/80">Support for Personal Local IP & Render Cloud Engine</p>
         </div>
     </footer>
 
@@ -203,16 +203,27 @@
         const errorAlert = document.getElementById('error-alert');
         const errorMessage = document.getElementById('error-message');
         const engineSelect = document.getElementById('engine-select');
-        const localEngineBanner = document.getElementById('local-engine-banner');
-        const switchLocalBtn = document.getElementById('switch-local-btn');
+        const customIpContainer = document.getElementById('custom-ip-container');
+        const customIpInput = document.getElementById('custom-ip-input');
 
         let selectedFormatId = null;
         let activeVideoUrl = '';
 
+        engineSelect.addEventListener('change', () => {
+            if (engineSelect.value === 'custom') {
+                customIpContainer.classList.remove('hidden');
+            } else {
+                customIpContainer.classList.add('hidden');
+            }
+        });
+
         function getApiBaseUrl() {
             const mode = engineSelect.value;
             if (mode === 'local') return 'http://127.0.0.1:5000';
-            if (mode === 'current') return window.location.origin;
+            if (mode === 'custom') {
+                const val = customIpInput.value.trim();
+                return val ? (val.startsWith('http') ? val : `http://${val}`) : 'http://127.0.0.1:5000';
+            }
             return window.location.origin;
         }
 
@@ -239,17 +250,10 @@
             resultSection.classList.remove('hidden');
             videoCard.classList.add('hidden');
             downloadBtn.disabled = true;
-
-            if (message.includes('not a bot') || message.includes('Sign in') || message.includes('timed out')) {
-                localEngineBanner.classList.remove('hidden');
-            } else {
-                localEngineBanner.classList.add('hidden');
-            }
         }
 
         function hideError() {
             errorAlert.classList.add('hidden');
-            localEngineBanner.classList.add('hidden');
             videoCard.classList.remove('hidden');
         }
 
@@ -304,24 +308,37 @@
 
         async function fetchInfo(url) {
             const baseUrl = getApiBaseUrl();
-            const res = await fetch(`${baseUrl}/fetch-info`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ url })
-            });
+            try {
+                const res = await fetch(`${baseUrl}/fetch-info`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url })
+                });
 
-            const contentType = res.headers.get('content-type') || '';
-            if (!contentType.includes('application/json')) {
-                const text = await res.text();
-                if (res.status === 504 || res.status === 502) {
-                    throw new Error('Server request timed out on cloud server. Please try again or switch to Local Engine.');
+                const contentType = res.headers.get('content-type') || '';
+                if (!contentType.includes('application/json')) {
+                    const text = await res.text();
+                    throw new Error(`Non-JSON response from server (${res.status})`);
                 }
-                throw new Error(`Server returned non-JSON response (${res.status}): ${text.slice(0, 100)}`);
-            }
 
-            const data = await res.json();
-            if (!res.ok) throw new Error(data.error || 'Failed to analyze YouTube video');
-            return data;
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'Failed to analyze YouTube video');
+                return data;
+            } catch (err) {
+                // If Local IP is offline/failed, fallback to current domain
+                if (engineSelect.value === 'local') {
+                    console.warn('Local IP unavailable, falling back to cloud engine...');
+                    const cloudRes = await fetch(`${window.location.origin}/fetch-info`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ url })
+                    });
+                    const cloudData = await cloudRes.json();
+                    if (!cloudRes.ok) throw new Error(cloudData.error || err.message);
+                    return cloudData;
+                }
+                throw err;
+            }
         }
 
         form.addEventListener('submit', async (e) => {
@@ -368,12 +385,6 @@
                 downloadSpinner.classList.add('hidden');
                 downloadBtn.disabled = false;
             }, 5000);
-        });
-
-        switchLocalBtn.addEventListener('click', () => {
-            engineSelect.value = 'local';
-            hideError();
-            form.dispatchEvent(new Event('submit'));
         });
     </script>
 </body>
