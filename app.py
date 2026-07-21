@@ -1,5 +1,4 @@
 import os
-import random
 import shutil
 import tempfile
 import traceback
@@ -19,16 +18,12 @@ except Exception:
 
 app = Flask(__name__)
 
-# Verified Working Webshare Residential Proxies (HTTP & SOCKS5)
-WEBSHARE_PROXIES = [
+# Primary Fast Webshare Residential Proxies (HTTP & SOCKS5)
+FAST_WEBSHARE_PROXIES = [
     'http://jufzjzml:5ibfzrazhgap@31.59.20.176:6754',
-    'socks5://jufzjzml:5ibfzrazhgap@31.59.20.176:6754',
     'http://jufzjzml:5ibfzrazhgap@31.56.127.193:7684',
+    'socks5://jufzjzml:5ibfzrazhgap@31.59.20.176:6754',
     'socks5://jufzjzml:5ibfzrazhgap@31.56.127.193:7684',
-    'http://jufzjzml:5ibfzrazhgap@84.247.60.125:6095',
-    'socks5://jufzjzml:5ibfzrazhgap@84.247.60.125:6095',
-    'http://jufzjzml:5ibfzrazhgap@191.96.254.138:6185',
-    'socks5://jufzjzml:5ibfzrazhgap@191.96.254.138:6185',
 ]
 
 @app.after_request
@@ -76,7 +71,7 @@ def get_base_ydl_options(extra_opts=None):
         'quiet': True,
         'no_warnings': True,
         'impersonate': IMPERSONATE_CHROME,
-        'socket_timeout': 10,
+        'socket_timeout': 4,
     }
     
     cookies_content = (
@@ -110,10 +105,9 @@ def extract_info_with_fallback(url, extra_opts=None):
     download_flag = extra_opts.get('download', False) if extra_opts else False
     errors = []
 
-    proxy_pool = WEBSHARE_PROXIES[:]
-    random.shuffle(proxy_pool)
+    proxy_pool = FAST_WEBSHARE_PROXIES[:]
 
-    # Strategy 1: Residential Proxy Pool
+    # Strategy 1: Primary Fast Residential Proxies
     for proxy in proxy_pool:
         try:
             opts = get_base_ydl_options(extra_opts)
@@ -123,7 +117,7 @@ def extract_info_with_fallback(url, extra_opts=None):
                 if has_playable_video_formats(res):
                     return res
         except Exception as e:
-            errors.append(f"Proxy ({proxy[:25]}...): {str(e)}")
+            errors.append(str(e))
 
     # Strategy 2: Direct connection with cookies
     try:
@@ -133,9 +127,9 @@ def extract_info_with_fallback(url, extra_opts=None):
             if has_playable_video_formats(res):
                 return res
     except Exception as e:
-        errors.append(f"Direct: {str(e)}")
+        errors.append(str(e))
 
-    err_summary = " | ".join(errors[-2:]) if errors else "Extraction failed"
+    err_summary = errors[-1] if errors else "Extraction failed"
     raise Exception(err_summary)
 
 def estimate_size_mb(fmt, duration):
