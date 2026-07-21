@@ -12,8 +12,8 @@ if os.path.exists(local_bin) and local_bin not in os.environ.get('PATH', ''):
 
 app = Flask(__name__)
 
-# Primary Residential Proxy
-PRIMARY_PROXY = 'http://jufzjzml:5ibfzrazhgap@31.59.20.176:6754'
+# Webshare Port 80 Backconnect Rotating Proxy
+ROTATING_PROXY = 'http://jufzjzml-rotate:5ibfzrazhgap@p.webshare.io:80'
 
 DEFAULT_COOKIES = """# Netscape HTTP Cookie File
 .youtube.com	TRUE	/	TRUE	1798089081	VISITOR_PRIVACY_METADATA	CgJJThIEGgAgRg%3D%3D
@@ -108,25 +108,26 @@ def extract_info_with_fallback(url, extra_opts=None):
     download_flag = extra_opts.get('download', False) if extra_opts else False
     errors = []
 
-    # Strategy 1: Primary Residential Proxy + Session Cookies
-    opts1 = get_base_ydl_options(extra_opts)
-    opts1['proxy'] = PRIMARY_PROXY
-    try:
-        with yt_dlp.YoutubeDL(opts1) as ydl:
-            res = ydl.extract_info(url, download=download_flag)
-            if res and res.get('formats'):
-                stream_fmts = [f for f in res.get('formats', []) if f.get('ext') not in ('mhtml', 'storyboard')]
-                if stream_fmts:
-                    cleanup_opts_cookiefile(opts1)
-                    return res
+    # Strategy 1: Port 80 Webshare Rotating Proxy (Up to 3 fast attempts)
+    for attempt in range(3):
+        opts = get_base_ydl_options(extra_opts)
+        opts['proxy'] = ROTATING_PROXY
+        try:
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                res = ydl.extract_info(url, download=download_flag)
+                if res and res.get('formats'):
+                    stream_fmts = [f for f in res.get('formats', []) if f.get('ext') not in ('mhtml', 'storyboard')]
+                    if stream_fmts:
+                        cleanup_opts_cookiefile(opts)
+                        return res
+                    else:
+                        errors.append(f"Proxy attempt {attempt+1}: Only storyboards")
                 else:
-                    errors.append(f"Proxy returned only {len(res.get('formats'))} storyboard formats")
-            else:
-                errors.append("Proxy returned 0 formats")
-    except Exception as e:
-        errors.append(f"Proxy error: {str(e)}")
-    finally:
-        cleanup_opts_cookiefile(opts1)
+                    errors.append(f"Proxy attempt {attempt+1}: 0 formats")
+        except Exception as e:
+            errors.append(f"Proxy attempt {attempt+1}: {str(e)[:40]}")
+        finally:
+            cleanup_opts_cookiefile(opts)
 
     # Strategy 2: Direct connection fallback
     opts2 = get_base_ydl_options(extra_opts)
@@ -139,11 +140,11 @@ def extract_info_with_fallback(url, extra_opts=None):
                     cleanup_opts_cookiefile(opts2)
                     return res
                 else:
-                    errors.append(f"Direct returned only {len(res.get('formats'))} storyboard formats")
+                    errors.append("Direct: Only storyboards")
             else:
-                errors.append("Direct returned 0 formats")
+                errors.append("Direct: 0 formats")
     except Exception as e:
-        errors.append(f"Direct error: {str(e)}")
+        errors.append(f"Direct: {str(e)[:40]}")
     finally:
         cleanup_opts_cookiefile(opts2)
 
