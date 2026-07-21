@@ -1,4 +1,5 @@
 import os
+import random
 import shutil
 import tempfile
 import traceback
@@ -18,11 +19,29 @@ except Exception:
 
 app = Flask(__name__)
 
-# Fastest Verified Webshare Residential Proxies
-FAST_WEBSHARE_PROXIES = [
+# Verified Working Webshare Residential Proxies
+WEBSHARE_PROXIES = [
     'http://jufzjzml:5ibfzrazhgap@31.59.20.176:6754',
     'http://jufzjzml:5ibfzrazhgap@31.56.127.193:7684',
+    'http://jufzjzml:5ibfzrazhgap@84.247.60.125:6095',
+    'http://jufzjzml:5ibfzrazhgap@191.96.254.138:6185',
 ]
+
+DEFAULT_COOKIES = """# Netscape HTTP Cookie File
+.youtube.com	TRUE	/	TRUE	1798089081	VISITOR_PRIVACY_METADATA	CgJJThIEGgAgRg%3D%3D
+.youtube.com	TRUE	/	TRUE	1798089081	VISITOR_INFO1_LIVE	u7nb7Mcu6ls
+.youtube.com	TRUE	/	TRUE	1819181304	PREF	f7=4100&tz=Asia.Calcutta&f4=4000000&f5=20000
+.youtube.com	TRUE	/	TRUE	1791204351	__Secure-BUCKET	CIAG
+.youtube.com	TRUE	/	TRUE	1813162597	LOGIN_INFO	AFmmF2swRQIhAIgOEd1a2XI4zwkOub1ppm-drTLxAyAg2EQZ9k2QL7mMAiBkE8nkwU1zSijERylGoJWW3jBeEYRPkINbsklMP4kYuA:QUQ3MjNmenc5TWdYVW9sV1piM3lQZHlhTGFLdnZQTEt2STUwZ0d0ZFVrQmZsZ0E1d1owM2xuanBRTjFEaHJHUWpPTXU4LU83MTJyeE9YcUFTX21rbE85MFZCMGZCMXZyZUYxb196QTZ0Nk5rc0dma3FrMS1DQWs1cDBGMGZOcUNDM05pbGZFNUlMOXBndm1zcnpRT1B5M0Noak5nT0FvSTRR
+.youtube.com	TRUE	/	FALSE	1819123809	HSID	AvN5juLVPxa-G5K_n
+.youtube.com	TRUE	/	TRUE	1819123809	SSID	ActLeCD2kFJK5T6XM
+.youtube.com	TRUE	/	FALSE	1819123809	APISID	v_GrH6QJtJqkqcSF/AoGyXJVnf2P5zYmBO
+.youtube.com	TRUE	/	TRUE	1819123809	SAPISID	lGNUPf
+.youtube.com	TRUE	/	TRUE	1819123809	__Secure-1PAPISID	lGNUPf
+.youtube.com	TRUE	/	TRUE	1819123809	__Secure-3PAPISID	lGNUPf
+.youtube.com	TRUE	/	FALSE	1819123809	SID	g.a000AgkHpeb17C4y8tSrGGXzjvsB3j3xFdi2nHPyvEAa32mTH4WNv0U4hMqDT84Zo-n8ufoxfwACgYKASQSARYSFQHGX2MiSaVkzCKrw--CFQNNF6V7-xoVAUF8yKqphNsj4dKMDTnJyRnUsrX80076
+.youtube.com	TRUE	/	TRUE	1819123809	__Secure-1PSID	g.a000AgkHpeb17C4y8tSrGGXzjvsB3j3xFdi2nHPyvEAa32mTH4WNv0U4hMqDT84Zo-n8ufoxfwACgYKASQSARYSFQHGX2MiSaVkzCKrw--CFQNNF6V7-xoVAUF8yKqphNsj4dKMDTnJyRnUsrX80076
+.youtube.com	TRUE	/	TRUE	1819123809	__Secure-3PSID	g.a000AgkHpeb17C4y8tSrGGXzjvsB3j3xFdi2nHPyvEAa32mTH4WNv0U4hMqDT84Zo-n8ufoxfwACgYKASQSARYSFQHGX2MiSaVkzCKrw--CFQNNF6V7-xoVAUF8yKqphNsj4dKMDTnJyRnUsrX80076"""
 
 @app.after_request
 def add_cors_headers(response):
@@ -69,14 +88,15 @@ def get_base_ydl_options(extra_opts=None):
         'quiet': True,
         'no_warnings': True,
         'impersonate': IMPERSONATE_CHROME,
-        'socket_timeout': 4,
+        'socket_timeout': 5,
     }
     
     cookies_content = (
         os.environ.get("YOUTUBE_COOKIES") or 
         os.environ.get("COOKIES_TEXT") or 
         os.environ.get("COOKIES") or 
-        os.environ.get("YT_COOKIES")
+        os.environ.get("YT_COOKIES") or
+        DEFAULT_COOKIES
     )
     clean_cookies = format_as_netscape_cookiefile(cookies_content)
     if clean_cookies:
@@ -103,8 +123,11 @@ def extract_info_with_fallback(url, extra_opts=None):
     download_flag = extra_opts.get('download', False) if extra_opts else False
     errors = []
 
-    # Strategy 1: Fast Residential Proxies (2 attempts max)
-    for proxy in FAST_WEBSHARE_PROXIES:
+    proxy_pool = WEBSHARE_PROXIES[:]
+    random.shuffle(proxy_pool)
+
+    # Strategy 1: Residential Proxy Pool + Cookies
+    for proxy in proxy_pool:
         try:
             opts = get_base_ydl_options(extra_opts)
             opts['proxy'] = proxy
