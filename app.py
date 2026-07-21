@@ -12,8 +12,13 @@ if os.path.exists(local_bin) and local_bin not in os.environ.get('PATH', ''):
 
 app = Flask(__name__)
 
-# Webshare Port 80 Backconnect Rotating Proxy
-ROTATING_PROXY = 'http://jufzjzml-rotate:5ibfzrazhgap@p.webshare.io:80'
+# Verified Working Sticky Residential Proxies
+VERIFIED_STICKY_PROXIES = [
+    'http://jufzjzml:5ibfzrazhgap@31.59.20.176:6754',
+    'http://jufzjzml:5ibfzrazhgap@31.56.127.193:7684',
+    'http://jufzjzml:5ibfzrazhgap@45.38.107.97:6014',
+    'http://jufzjzml:5ibfzrazhgap@84.247.60.125:6095',
+]
 
 DEFAULT_COOKIES = """# Netscape HTTP Cookie File
 .youtube.com	TRUE	/	TRUE	1798089081	VISITOR_PRIVACY_METADATA	CgJJThIEGgAgRg%3D%3D
@@ -75,7 +80,7 @@ def get_base_ydl_options(extra_opts=None):
     opts = {
         'quiet': True,
         'no_warnings': True,
-        'socket_timeout': 5,
+        'socket_timeout': 4,
     }
     
     cookies_content = (
@@ -108,10 +113,10 @@ def extract_info_with_fallback(url, extra_opts=None):
     download_flag = extra_opts.get('download', False) if extra_opts else False
     errors = []
 
-    # Strategy 1: Port 80 Webshare Rotating Proxy (Up to 3 fast attempts)
-    for attempt in range(3):
+    # Strategy 1: Verified Sticky Residential Proxy Pool
+    for proxy in VERIFIED_STICKY_PROXIES:
         opts = get_base_ydl_options(extra_opts)
-        opts['proxy'] = ROTATING_PROXY
+        opts['proxy'] = proxy
         try:
             with yt_dlp.YoutubeDL(opts) as ydl:
                 res = ydl.extract_info(url, download=download_flag)
@@ -121,11 +126,11 @@ def extract_info_with_fallback(url, extra_opts=None):
                         cleanup_opts_cookiefile(opts)
                         return res
                     else:
-                        errors.append(f"Proxy attempt {attempt+1}: Only storyboards")
+                        errors.append(f"Proxy ({proxy[31:45]}): Only storyboards")
                 else:
-                    errors.append(f"Proxy attempt {attempt+1}: 0 formats")
+                    errors.append(f"Proxy ({proxy[31:45]}): 0 formats")
         except Exception as e:
-            errors.append(f"Proxy attempt {attempt+1}: {str(e)[:40]}")
+            errors.append(f"Proxy ({proxy[31:45]}): {str(e)[:40]}")
         finally:
             cleanup_opts_cookiefile(opts)
 
