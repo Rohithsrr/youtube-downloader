@@ -1,5 +1,4 @@
 import os
-import random
 import shutil
 import tempfile
 import traceback
@@ -13,7 +12,7 @@ if os.path.exists(local_bin) and local_bin not in os.environ.get('PATH', ''):
 
 app = Flask(__name__)
 
-# Single Primary Fast Webshare Residential Proxy
+# Primary Residential Proxy
 PRIMARY_PROXY = 'http://jufzjzml:5ibfzrazhgap@31.59.20.176:6754'
 
 DEFAULT_COOKIES = """# Netscape HTTP Cookie File
@@ -99,7 +98,6 @@ def get_base_ydl_options(extra_opts=None):
 
 def extract_info_with_fallback(url, extra_opts=None):
     download_flag = extra_opts.get('download', False) if extra_opts else False
-    errors = []
 
     # Strategy 1: Primary Residential Proxy + Session Cookies
     try:
@@ -108,11 +106,11 @@ def extract_info_with_fallback(url, extra_opts=None):
         with yt_dlp.YoutubeDL(opts) as ydl:
             res = ydl.extract_info(url, download=download_flag)
             if res and res.get('formats'):
-                return res
-            else:
-                errors.append("Proxy: No formats")
+                fmts = [f for f in res.get('formats', []) if f.get('ext') not in ('mhtml', 'storyboard')]
+                if fmts:
+                    return res
     except Exception as e:
-        errors.append(f"Proxy: {str(e)}")
+        proxy_err = str(e)
 
     # Strategy 2: Direct connection fallback
     try:
@@ -120,13 +118,15 @@ def extract_info_with_fallback(url, extra_opts=None):
         with yt_dlp.YoutubeDL(opts) as ydl:
             res = ydl.extract_info(url, download=download_flag)
             if res and res.get('formats'):
-                return res
-            else:
-                errors.append("Direct: No formats")
+                fmts = [f for f in res.get('formats', []) if f.get('ext') not in ('mhtml', 'storyboard')]
+                if fmts:
+                    return res
     except Exception as e:
-        errors.append(f"Direct: {str(e)}")
+        direct_err = str(e)
 
-    raise Exception(" | ".join(errors) if errors else "Extraction failed")
+    p_err = proxy_err if 'proxy_err' in locals() else 'Proxy returned 0 valid stream formats'
+    d_err = direct_err if 'direct_err' in locals() else 'Direct returned 0 valid stream formats'
+    raise Exception(f"Proxy Failed ({p_err}) | Direct Failed ({d_err})")
 
 def estimate_size_mb(fmt, duration):
     try:
