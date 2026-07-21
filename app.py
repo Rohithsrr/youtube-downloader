@@ -19,12 +19,16 @@ except Exception:
 
 app = Flask(__name__)
 
-# Verified Working Webshare Residential Proxies
+# Verified Working Webshare Residential Proxies (HTTP & SOCKS5)
 WEBSHARE_PROXIES = [
     'http://jufzjzml:5ibfzrazhgap@31.59.20.176:6754',
+    'socks5://jufzjzml:5ibfzrazhgap@31.59.20.176:6754',
     'http://jufzjzml:5ibfzrazhgap@31.56.127.193:7684',
+    'socks5://jufzjzml:5ibfzrazhgap@31.56.127.193:7684',
     'http://jufzjzml:5ibfzrazhgap@84.247.60.125:6095',
+    'socks5://jufzjzml:5ibfzrazhgap@84.247.60.125:6095',
     'http://jufzjzml:5ibfzrazhgap@191.96.254.138:6185',
+    'socks5://jufzjzml:5ibfzrazhgap@191.96.254.138:6185',
 ]
 
 @app.after_request
@@ -72,7 +76,7 @@ def get_base_ydl_options(extra_opts=None):
         'quiet': True,
         'no_warnings': True,
         'impersonate': IMPERSONATE_CHROME,
-        'socket_timeout': 8,
+        'socket_timeout': 10,
     }
     
     cookies_content = (
@@ -104,26 +108,12 @@ def has_playable_video_formats(info):
 
 def extract_info_with_fallback(url, extra_opts=None):
     download_flag = extra_opts.get('download', False) if extra_opts else False
-    last_error = None
+    errors = []
 
-    proxy_pool = []
-    proxy_env = os.environ.get("PROXY_URL") or os.environ.get("WEBSHARE_PROXIES")
-    if proxy_env:
-        for p in proxy_env.split(','):
-            p = p.strip()
-            if p:
-                if len(p.split(':')) == 4:
-                    ip, port, user, pwd = p.split(':')
-                    proxy_pool.append(f"http://{user}:{pwd}@{ip}:{port}")
-                else:
-                    proxy_pool.append(p if p.startswith('http') else f"http://{p}")
-
-    if not proxy_pool:
-        proxy_pool = WEBSHARE_PROXIES[:]
-
+    proxy_pool = WEBSHARE_PROXIES[:]
     random.shuffle(proxy_pool)
 
-    # Strategy 1: Iterate through residential proxies in pool
+    # Strategy 1: Residential Proxy Pool
     for proxy in proxy_pool:
         try:
             opts = get_base_ydl_options(extra_opts)
@@ -133,9 +123,9 @@ def extract_info_with_fallback(url, extra_opts=None):
                 if has_playable_video_formats(res):
                     return res
         except Exception as e:
-            last_error = e
+            errors.append(f"Proxy ({proxy[:25]}...): {str(e)}")
 
-    # Strategy 2: Direct connection fallback
+    # Strategy 2: Direct connection with cookies
     try:
         opts = get_base_ydl_options(extra_opts)
         with yt_dlp.YoutubeDL(opts) as ydl:
@@ -143,9 +133,10 @@ def extract_info_with_fallback(url, extra_opts=None):
             if has_playable_video_formats(res):
                 return res
     except Exception as e:
-        last_error = e
+        errors.append(f"Direct: {str(e)}")
 
-    raise last_error if last_error else Exception("Failed to extract video information from YouTube.")
+    err_summary = " | ".join(errors[-2:]) if errors else "Extraction failed"
+    raise Exception(err_summary)
 
 def estimate_size_mb(fmt, duration):
     try:
@@ -288,7 +279,7 @@ def get_download_link():
                 direct_url = req_formats[0].get('url')
 
         if not direct_url:
-            return jsonify({'error': 'Could not extract direct stream URL.'}), 400
+            return jsonify({'error': 'Could not extract direct stream URL.'}), 500
 
         return jsonify({
             'download_url': direct_url,
